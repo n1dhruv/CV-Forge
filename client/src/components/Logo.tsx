@@ -1,0 +1,1 @@
+export function Logo(){return <div className="flex items-center gap-2.5"><span aria-hidden className="grid size-7 place-items-center border border-ink font-display text-lg leading-none">R</span><span className="font-display text-xl font-semibold tracking-tight">ResumeForge</span></div>}

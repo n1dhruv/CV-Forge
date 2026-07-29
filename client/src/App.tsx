@@ -1,0 +1,10 @@
+import { Route, Routes } from 'react-router-dom'
+import { AppShell } from './components/AppShell'
+import { ATSScore } from './screens/ATSScore'
+import { Dashboard } from './screens/Dashboard'
+import { LatexEditor } from './screens/Editor'
+import { Integrations } from './screens/Integrations'
+import { JDInput } from './screens/JDInput'
+import { MatchReview } from './screens/MatchReview'
+import { SkillBank } from './screens/SkillBank'
+export default function App(){return <Routes><Route element={<AppShell/>}><Route index element={<Dashboard/>}/><Route path="skill-bank" element={<SkillBank/>}/><Route path="job-description" element={<JDInput/>}/><Route path="review" element={<MatchReview/>}/><Route path="editor" element={<LatexEditor/>}/><Route path="integrations" element={<Integrations/>}/><Route path="ats" element={<ATSScore/>}/></Route></Routes>}
