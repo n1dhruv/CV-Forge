@@ -33,3 +33,9 @@ htmlcov/
 tmp/
 temp/
 
+.agents
+.claude
+
+skills-lock.json
+
+docs
