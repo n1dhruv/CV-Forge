@@ -1,0 +1,43 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Test and coverage output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Build and package output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Local environment files (templates remain tracked)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Framework and local runtime data
+*.db
+*.sqlite
+*.sqlite3
+celerybeat-schedule*
+
+# Logs
+*.log
