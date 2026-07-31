@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/react": "^6.12.10",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-query": "^5.66.0",
     "lucide-react": "^0.468.0",
