@@ -7,7 +7,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {UUID: PGUUID(as_uuid=True)}
+    type_annotation_map = {
+        UUID: PGUUID(as_uuid=True),
+        datetime: DateTime(timezone=True),
+    }
 
 
 class TimestampMixin:

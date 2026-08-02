@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
@@ -9,6 +10,10 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.user import User
+
 
 class SkillBankItem(TimestampMixin, Base):
     __tablename__ = "skill_bank_items"
@@ -53,7 +58,3 @@ class BulletPoint(TimestampMixin, Base):
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
     display_order: Mapped[int] = mapped_column(Integer, server_default=sql_text("0"))
     item: Mapped[SkillBankItem] = relationship(back_populates="bullet_points")
-
-
-from app.models.user import User  # noqa: E402
-

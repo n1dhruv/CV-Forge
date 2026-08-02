@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.skill_bank import SkillBankItem
 
 
 class User(TimestampMixin, Base):
@@ -19,6 +23,3 @@ class User(TimestampMixin, Base):
     skill_bank_items: Mapped[list["SkillBankItem"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
-
-
-from app.models.skill_bank import SkillBankItem  # noqa: E402
