@@ -56,3 +56,4 @@ class BulletPoint(TimestampMixin, Base):
 
 
 from app.models.user import User  # noqa: E402
+
