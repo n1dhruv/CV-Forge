@@ -10,7 +10,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
-
 class SkillBankItem(TimestampMixin, Base):
     __tablename__ = "skill_bank_items"
     __table_args__ = (
