@@ -2,8 +2,8 @@ from datetime import datetime
 
 from sqlalchemy import DateTime
 
+import app.models  # noqa: F401 -- register every model with Base.metadata
 from app.models.base import Base
-from app.models.resume import JobDescription, ResumeVersion
 
 
 def test_datetime_annotations_map_to_timezone_aware_columns() -> None:
@@ -13,9 +13,20 @@ def test_datetime_annotations_map_to_timezone_aware_columns() -> None:
     assert mapped_type.timezone is True
 
 
-def test_resume_created_at_columns_are_timezone_aware() -> None:
-    for model in (JobDescription, ResumeVersion):
-        created_at_type = model.__table__.c.created_at.type
+def test_all_datetime_columns_are_timezone_aware() -> None:
+    datetime_columns = {
+        (table.name, column.name): column.type
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if isinstance(column.type, DateTime)
+    }
+    expected_integration_columns = {
+        ("github_repos", "created_at"),
+        ("github_repos", "last_synced_at"),
+        ("leetcode_stats", "last_synced_at"),
+    }
 
-        assert isinstance(created_at_type, DateTime)
-        assert created_at_type.timezone is True
+    assert expected_integration_columns <= datetime_columns.keys()
+    assert [
+        name for name, column_type in datetime_columns.items() if not column_type.timezone
+    ] == []
