@@ -232,17 +232,35 @@ docker compose exec backend alembic upgrade head
 The API will be available at `http://localhost:8000`, with interactive docs at `http://localhost:8000/docs`.
  
 ### Running Without Docker
- 
+
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
- 
-# Start the API
-uvicorn app.main:app --reload
- 
-# In a separate terminal, start the worker
-celery -A app.workers.celery_app worker --loglevel=info
+# Enter the backend project after cloning the repository
+cd server
+
+# Create .env from the tracked template, then fill in its values
+cp .env.example .env
+
+# Create server/.venv and install the exact locked dependencies
+uv sync
+
+# Apply database migrations
+uv run alembic upgrade head
+
+# Start the API with uvicorn app.main:app --reload
+uv run app
+```
+
+The API is available at `http://localhost:8000`. On another machine, install
+[uv](https://docs.astral.sh/uv/getting-started/installation/), clone the repository, and run the
+same commands. `uv sync` creates the virtual environment automatically when it does not exist.
+
+For pip-based environments, install the locked runtime dependencies exported from the same uv
+lockfile:
+
+```bash
+cd server
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
 ```
  
 ---
@@ -352,4 +370,3 @@ pytest --cov=app --cov-report=term-missing
 ## Contributing
  
 Contributions are welcome. Please open an issue to discuss significant changes before submitting a pull request. Run the full test suite and linters (`ruff`, `black`) before submitting.
- 
