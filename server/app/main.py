@@ -4,6 +4,7 @@ from typing import AsyncIterator
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.jd import router as jd_router
@@ -31,6 +32,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="CV-Forge API", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials = True,
+    allow_methods = ["*"],
+    allow_headers = ["*"]
+)
+
 app.include_router(webhook_router)
 app.include_router(skill_bank_router)
 app.include_router(storage_router)

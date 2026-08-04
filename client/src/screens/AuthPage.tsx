@@ -20,7 +20,8 @@ const appearance = {
     rootBox: 'w-full',
     cardBox: 'w-full shadow-none',
     card: 'w-full border border-line shadow-none',
-    headerTitle: 'font-display font-medium',
+    headerTitle: 'hidden',
+    headerSubtitle: 'hidden',
     formButtonPrimary: 'bg-ink text-canvas hover:bg-ink hover:opacity-85',
     footerActionLink: 'text-accent hover:text-accent',
   },
@@ -35,14 +36,15 @@ export function AuthPage({mode}:AuthPageProps) {
         <p className="eyebrow !text-canvas/60 dark:!text-muted">ResumeForge</p>
         <h1 className="mt-5 font-display text-5xl font-medium leading-[1.02]">One trusted record.<br/><em className="font-normal text-accent">A sharper application.</em></h1>
         <p className="mt-6 text-canvas/70 dark:text-muted">Build a reliable skill bank, then shape it for each opportunity with every change under your control.</p>
-        <ul className="mt-10 space-y-4 text-sm">{['Evidence stays grounded in your real work','AI suggestions always require approval','Career data remains organized and reusable'].map(item=><li className="flex items-center gap-3" key={item}><Check className="text-accent" size={16}/>{item}</li>)}</ul>
+        <ul className="mt-10 space-y-4 text-sm">{['Evidence stays grounded in your real work','AI suggestions always require approval','Career data remains organized and reusable'].map(item=><li className="flex items-center gap-3" key={item}><Check className="text-accent" size={16} aria-hidden="true"/>{item}</li>)}</ul>
       </div>
       <p className="text-xs text-canvas/50 dark:text-muted">Phase 1 · Secure account access</p>
     </section>
     <section className="flex min-h-screen flex-col px-5 py-6 md:px-10 md:py-8">
-      <div className="flex items-center justify-between lg:justify-end"><Link to="/" className="lg:hidden"><Logo/></Link><Link className="button-ghost" to="/"><ArrowLeft size={16}/>Back home</Link></div>
+      <div className="flex items-center justify-between lg:justify-end"><Link to="/" className="lg:hidden"><Logo/></Link><Link className="button-ghost" to="/"><ArrowLeft size={16} aria-hidden="true"/>Back Home</Link></div>
       <div className="my-auto flex w-full justify-center py-10">
         <div className="w-full max-w-md">
+          <div className="mb-5 text-center"><h1 className="section-title">{signingIn?'Sign In to ResumeForge':'Create Your ResumeForge Account'}</h1><p className="mt-2 text-sm text-muted">{signingIn?'Welcome back. Continue to your evidence workspace.':'Start your private career evidence workspace.'}</p></div>
           {signingIn
             ? <SignIn routing="path" path="/sign-in" signUpUrl="/sign-up" fallbackRedirectUrl="/dashboard" appearance={appearance}/>
             : <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" fallbackRedirectUrl="/dashboard" appearance={appearance}/>

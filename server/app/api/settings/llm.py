@@ -61,7 +61,6 @@ async def test_llm_settings(current_user: CurrentUser) -> LLMTestResult:
         await llm_client.get_completion(
             current_user.id,
             [{"role": "user", "content": "Reply with OK."}],
-            max_tokens=2,
         )
     except llm_client.LLMError as exc:
         return LLMTestResult(success=False, error=str(exc))

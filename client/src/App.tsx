@@ -9,6 +9,7 @@ import { Integrations } from './screens/Integrations'
 import { JDInput } from './screens/JDInput'
 import { MatchReview } from './screens/MatchReview'
 import { SkillBank } from './screens/SkillBank'
+import { Settings } from './screens/Settings'
 import { Home } from './screens/Home'
 
 function ProtectedWorkspace() {
@@ -26,6 +27,7 @@ export default function App(){return <Routes>
     <Route path="dashboard" element={<Dashboard/>}/>
     <Route path="skill-bank" element={<SkillBank/>}/>
     <Route path="job-description" element={<JDInput/>}/>
+    <Route path="settings" element={<Settings/>}/>
     <Route path="review" element={<MatchReview/>}/>
     <Route path="editor" element={<LatexEditor/>}/>
     <Route path="integrations" element={<Integrations/>}/>

@@ -1,6 +1,6 @@
-import type { Integration, ParsedJobDescription, ResumeVersion, RewriteSuggestion, SkillBankItem } from './types'
+import type { DemoParsedJobDescription, DemoSkillBankItem, Integration, ResumeVersion, RewriteSuggestion } from './types'
 const self = (name: string) => ({ id: name.toLowerCase().replace(/ /g, '-'), name, source: 'self_reported' as const })
-export const skillBank: SkillBankItem[] = [
+export const skillBank: DemoSkillBankItem[] = [
   { id:'exp-1', type:'experience', title:'Product Engineer', organization:'Northstar Labs', location:'Bengaluru', startDate:'2023', endDate:'Present', description:'Developer infrastructure for high-growth product teams.', skills:[self('React'),self('TypeScript'),self('PostgreSQL')], bullets:[
     {id:'b1', text:'Rebuilt the release workflow in React and TypeScript, cutting median deployment setup from 18 minutes to 6 minutes.', tags:[self('React'),self('TypeScript')], metrics:['18 → 6 min']},
     {id:'b2', text:'Designed an audit-log pipeline backed by PostgreSQL that processed 2.4M monthly events with traceable retention controls.', tags:[self('PostgreSQL'),self('System Design')], metrics:['2.4M events/mo']},
@@ -12,7 +12,7 @@ export const skillBank: SkillBankItem[] = [
   ]},
   { id:'edu-1', type:'education', title:'B.Tech, Computer Science', organization:'PES University', startDate:'2019', endDate:'2023', description:'Coursework in distributed systems, databases, and human-computer interaction.', skills:[], bullets:[] }
 ]
-export const jd: ParsedJobDescription = { id:'jd-1', company:'Fathom', role:'Senior Product Engineer', seniority:'Senior', requiredSkills:['React','TypeScript','API design','PostgreSQL'], niceToHaveSkills:['Python','Developer tooling','Design systems'], atsKeywords:['cross-functional','performance','accessibility','distributed systems','observability','React','TypeScript'], responsibilities:['Own product features from discovery through delivery','Design reliable APIs and data models','Raise the quality bar for frontend architecture'], rawText:'We are looking for a Senior Product Engineer to own cross-functional product work...' }
+export const jd: DemoParsedJobDescription = { id:'jd-1', company:'Fathom', role:'Senior Product Engineer', seniority:'Senior', requiredSkills:['React','TypeScript','API design','PostgreSQL'], niceToHaveSkills:['Python','Developer tooling','Design systems'], atsKeywords:['cross-functional','performance','accessibility','distributed systems','observability','React','TypeScript'], responsibilities:['Own product features from discovery through delivery','Design reliable APIs and data models','Raise the quality bar for frontend architecture'], rawText:'We are looking for a Senior Product Engineer to own cross-functional product work...' }
 export const versions: ResumeVersion[] = [
  {id:'v4',name:'Fathom · Senior Product Engineer',company:'Fathom',role:'Senior Product Engineer',updatedAt:'Today, 10:42',atsScore:86,texSource:''},
  {id:'v3',name:'Linear · Product Engineer',company:'Linear',role:'Product Engineer',updatedAt:'25 Jul',atsScore:79,texSource:''},
