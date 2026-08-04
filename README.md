@@ -100,9 +100,9 @@ Slow or external-dependent operations (LLM calls, third-party API syncs, LaTeX c
 | Backend framework | FastAPI (Python 3.11+) |
 | Database | PostgreSQL 15+ with `pgvector` extension |
 | ORM / migrations | SQLAlchemy 2.x + Alembic |
-| Task queue | Celery or `arq`, with Redis as broker/backend |
+| Task queue | `arq`, with Redis as broker/backend |
 | Caching | Redis |
-| Embeddings & LLM calls | Provider-agnostic client (OpenAI/Anthropic-compatible), configurable model |
+| Embeddings & LLM calls | LiteLLM with per-user encrypted provider credentials (BYOK) |
 | LaTeX compilation | Tectonic (self-contained TeX engine, sandboxed subprocess) |
 | Auth | OAuth2 (GitHub, Google) + JWT session tokens |
 | Frontend | React + TypeScript, Monaco/CodeMirror for the LaTeX editor |
@@ -125,7 +125,8 @@ Input: pasted JD text or uploaded PDF. Output: structured JSON —
   "ats_keywords": ["..."]
 }
 ```
-Single LLM call constrained to a strict JSON schema.
+An `arq` worker extracts PDFs, calls LiteLLM with the submitting user's key, validates the strict
+JSON schema, retries malformed output once, and persists only validated results.
  
 ### Pipeline B — Skill Bank Embedding
 Every bullet point and skill entry is embedded on create/update and stored in `pgvector`. This is the retrieval index used by the matcher.
@@ -160,6 +161,8 @@ skill_bank_items   (id, user_id, type[experience|project|skill|education],
 bullet_points      (id, item_id, text, tags[], metrics, embedding)
 job_descriptions   (id, user_id, raw_text, parsed_json, created_at)
 jd_requirements    (id, jd_id, skill, importance[required|nice_to_have], category)
+user_llm_settings  (id, user_id, provider, model, encrypted_api_key, timestamps)
+background_jobs    (id, user_id, job_type, status, result, error, timestamps)
 resume_versions    (id, user_id, jd_id, tex_source, pdf_url, ats_score, created_at)
 github_repos       (id, user_id, repo_name, languages, readme_summary,
                      inferred_skills, last_synced_at)
@@ -248,6 +251,9 @@ uv run alembic upgrade head
 
 # Start the API with uvicorn app.main:app --reload
 uv run app
+
+# In a second terminal, start the background worker
+uv run arq app.workers.settings.WorkerSettings
 ```
 
 The API is available at `http://localhost:8000`. On another machine, install
@@ -271,8 +277,7 @@ python -m uvicorn app.main:app --reload
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `REDIS_URL` | Redis connection string (broker + cache) |
-| `LLM_API_KEY` | API key for the LLM provider used in parsing/rewriting |
-| `LLM_MODEL` | Model identifier to use for pipeline calls |
+| `ENCRYPTION_KEY` | Fernet key used to encrypt each user's stored LLM API key |
 | `EMBEDDING_MODEL` | Model identifier used for embeddings |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | OAuth credentials for GitHub integration |
 | `JWT_SECRET_KEY` | Secret used to sign session tokens |
@@ -290,7 +295,12 @@ See `.env.example` for the full list with defaults.
 |---|---|---|
 | `/api/skill_bank/items` | `GET`/`POST` | List or create skill bank entries |
 | `/api/skill_bank/items/{id}` | `PUT`/`DELETE` | Update or remove an entry |
-| `/api/jd/parse` | `POST` | Upload/paste a JD, returns parsed requirements |
+| `/api/settings/llm` | `GET`/`POST`/`DELETE` | Read, save, or remove the current user's BYOK configuration |
+| `/api/settings/llm/test` | `POST` | Test the currently saved provider credentials |
+| `/api/jd/parse` | `POST` | Upload/paste a JD and immediately return IDs for polling |
+| `/api/jd` | `GET` | List the current user's past JDs |
+| `/api/jd/{id}` | `GET` | Fetch a JD's status and validated parse result |
+| `/api/background_jobs/{id}` | `GET` | Poll generic background-job status, result, and error |
 | `/api/match/{jd_id}` | `POST` | Run matching pipeline, returns ranked bullet selection |
 | `/api/rewrite/{jd_id}` | `POST` | Generate rewritten bullets with diff for approval |
 | `/api/resume/generate` | `POST` | Assemble approved content into a LaTeX resume |

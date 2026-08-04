@@ -30,7 +30,7 @@ class JobDescription(Base):
         primary_key=True, server_default=sql_text("uuid_generate_v4()")
     )
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    raw_text: Mapped[str] = mapped_column(Text)
+    raw_text: Mapped[str | None] = mapped_column(Text)
     source_file_url: Mapped[str | None] = mapped_column(Text)
     parsed_json: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(Text, server_default=sql_text("'queued'"))
