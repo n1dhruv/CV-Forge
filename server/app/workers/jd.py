@@ -109,7 +109,7 @@ async def _set_status(
 async def _validated_completion(user_id: UUID, raw_text: str) -> JDParsed | None:
     messages = [{"role": "user", "content": prompt_for(raw_text)}]
     for attempt in range(2):
-        output = await llm_client.get_completion(user_id, messages, max_tokens=1200)
+        output = await llm_client.get_completion(user_id, messages)
         try:
             return JDParsed.model_validate_json(output)
         except ValidationError:
