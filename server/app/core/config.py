@@ -1,7 +1,8 @@
 from functools import lru_cache
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import Field, SecretStr, computed_field
+from cryptography.fernet import Fernet
+from pydantic import Field, SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,13 +19,18 @@ class Settings(BaseSettings):
     clerk_jwks_url: str = Field(alias="CLERK_JWKS_URL")
     clerk_issuer: str | None = Field(default=None, alias="CLERK_ISSUER")
     clerk_webhook_signing_secret: SecretStr = Field(alias="CLERK_WEBHOOK_SIGNING_SECRET")
-    llm_api_key: SecretStr = Field(alias="LLM_API_KEY")
-    llm_model: str = Field(alias="LLM_MODEL")
+    encryption_key: SecretStr = Field(alias="ENCRYPTION_KEY")
     embedding_model: str = Field(alias="EMBEDDING_MODEL")
     github_client_id: str = Field(alias="GITHUB_CLIENT_ID")
     github_client_secret: SecretStr = Field(alias="GITHUB_CLIENT_SECRET")
     tectonic_binary_path: str = Field(alias="TECTONIC_BINARY_PATH")
     environment: str = Field(alias="ENVIRONMENT")
+
+    @field_validator("encryption_key")
+    @classmethod
+    def validate_encryption_key(cls, value: SecretStr) -> SecretStr:
+        Fernet(value.get_secret_value().encode())
+        return value
 
     @computed_field
     @property

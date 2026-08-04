@@ -12,6 +12,29 @@ class StorageService:
         self.headers = {"Authorization": f"Bearer {key}", "apikey": key}
         self.bucket = settings.supabase_storage_bucket_resumes
 
+    async def upload(
+        self, path: str, content: bytes, content_type: str, bucket: str | None = None
+    ) -> str:
+        encoded = quote(path, safe="/")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.base_url}/object/{bucket or self.bucket}/{encoded}",
+                headers={**self.headers, "Content-Type": content_type},
+                content=content,
+            )
+            response.raise_for_status()
+        return path
+
+    async def download(self, path: str, bucket: str | None = None) -> bytes:
+        encoded = quote(path, safe="/")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.base_url}/object/authenticated/{bucket or self.bucket}/{encoded}",
+                headers=self.headers,
+            )
+            response.raise_for_status()
+        return response.content
+
     async def signed_upload_url(self, path: str) -> dict[str, str | None]:
         encoded = quote(path, safe="/")
         async with httpx.AsyncClient(timeout=10) as client:
