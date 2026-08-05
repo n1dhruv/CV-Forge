@@ -43,8 +43,28 @@ export interface JobDescription { id: string; status: JobStatus; parsed_json: JD
 export interface JobDescriptionListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
 export interface JDParseQueued { job_description_id: string; background_job_id: string }
 export interface BackgroundJob { status: JobStatus; result: Record<string, unknown> | null; error: string | null }
-export interface LLMSettings { provider: string; model: string; masked_key: string }
-export interface LLMSettingsSaved { provider: string; model: string }
+export interface LLMSettings {
+  provider: string
+  model: string
+  masked_key: string
+  embedding_provider?: string | null
+  embedding_model?: string | null
+  embedding_masked_key?: string | null
+}
+export interface LLMSettingsInput {
+  provider: string
+  model: string
+  api_key: string
+  embedding_provider?: string
+  embedding_model?: string
+  embedding_api_key?: string
+}
+export interface LLMSettingsSaved {
+  provider: string
+  model: string
+  embedding_provider?: string | null
+  embedding_model?: string | null
+}
 export interface LLMTestResult { success: boolean; error: string | null }
 export type SupportedModels = Record<string, string[]>
 

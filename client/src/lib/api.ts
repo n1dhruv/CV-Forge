@@ -1,6 +1,6 @@
 import type {
   BackgroundJob, BulletPoint, BulletPointInput, JobDescription, JobDescriptionListItem,
-  JDParseQueued, LLMSettings, LLMSettingsSaved, LLMTestResult, SkillBankItem,
+  JDParseQueued, LLMSettings, LLMSettingsInput, LLMSettingsSaved, LLMTestResult, SkillBankItem,
   SkillBankItemDetail, SkillBankItemInput, SupportedModels,
 } from './types'
 
@@ -43,7 +43,7 @@ export function createApiClient(getToken: GetToken) {
     },
     llmSettings: {
       get: () => request<LLMSettings>('/api/settings/llm'),
-      save: (settings: { provider: string; model: string; api_key: string }) => request<LLMSettingsSaved>('/api/settings/llm', { method: 'POST', body: JSON.stringify(settings) }),
+      save: (settings: LLMSettingsInput) => request<LLMSettingsSaved>('/api/settings/llm', { method: 'POST', body: JSON.stringify(settings) }),
       remove: () => request<void>('/api/settings/llm', { method: 'DELETE' }),
       test: () => request<LLMTestResult>('/api/settings/llm/test', { method: 'POST' }),
       supportedModels: () => request<SupportedModels>('/api/settings/llm/supported-models'),
