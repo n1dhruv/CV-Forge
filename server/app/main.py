@@ -12,7 +12,6 @@ from app.api.jobs import router as jobs_router
 from app.api.skill_bank import router as skill_bank_router
 from app.api.settings import router as llm_settings_router
 from app.api.storage import router as storage_router
-from app.api.webhooks import router as webhook_router
 from app.core.config import get_settings
 from app.db.session import engine
 
@@ -35,16 +34,15 @@ app = FastAPI(title="CV-Forge API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = [
+    allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
-    allow_credentials = True,
-    allow_methods = ["*"],
-    allow_headers = ["*"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-app.include_router(webhook_router)
 app.include_router(skill_bank_router)
 app.include_router(storage_router)
 app.include_router(llm_settings_router)

@@ -243,7 +243,7 @@ async def test_uploaded_pdf_is_stored_without_synchronous_extraction(
 async def test_submit_returns_ids_after_enqueue_without_running_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = User(id=uuid4(), clerk_user_id="user_a", email="a@example.com")
+    user = User(id=uuid4(), email="a@example.com")
     description = JobDescription(
         id=uuid4(), user_id=user.id, raw_text="Python role", status="queued"
     )
@@ -280,7 +280,7 @@ async def test_jd_and_job_queries_enforce_ownership() -> None:
 
 
 async def test_foreign_jd_and_job_return_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    user_b = User(id=uuid4(), clerk_user_id="user_b", email="b@example.com")
+    user_b = User(id=uuid4(), email="b@example.com")
     monkeypatch.setattr(jd, "get_owned_jd", AsyncMock(return_value=None))
     monkeypatch.setattr(jobs, "get_owned_job", AsyncMock(return_value=None))
 
@@ -294,7 +294,7 @@ async def test_foreign_jd_and_job_return_404(monkeypatch: pytest.MonkeyPatch) ->
 
 
 async def test_generic_job_endpoint_reflects_all_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    user = User(id=uuid4(), clerk_user_id="user_a", email="a@example.com")
+    user = User(id=uuid4(), email="a@example.com")
     job_id = uuid4()
     for status in ("queued", "running", "done", "failed"):
         job = BackgroundJob(

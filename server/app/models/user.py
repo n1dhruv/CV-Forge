@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Text, text
+from sqlalchemy import Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -15,8 +15,7 @@ if TYPE_CHECKING:
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("uuid_generate_v4()"))
-    clerk_user_id: Mapped[str] = mapped_column(Text, unique=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(Text)
     first_name: Mapped[str | None] = mapped_column(Text)
     last_name: Mapped[str | None] = mapped_column(Text)
