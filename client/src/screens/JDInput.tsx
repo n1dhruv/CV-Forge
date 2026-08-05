@@ -5,6 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import { ScreenState } from '../components/ScreenState'
 import { useApi } from '../hooks/useApi'
+import { useBackgroundJobStatus } from '../hooks/useBackgroundJobStatus'
 import { ApiError } from '../lib/api'
 import type { JobDescription, JDParseQueued } from '../lib/types'
 
@@ -15,7 +16,7 @@ export function JDInput(){
   const settings=useQuery({queryKey:['llm-settings'],queryFn:api.llmSettings.get,retry:(count,error)=>error instanceof ApiError&&error.status===404?false:count<1})
   const jds=useQuery({queryKey:['jds'],queryFn:api.jd.list,enabled:!!settings.data})
   const submit=useMutation({mutationFn:()=>mode==='paste'?api.jd.parseText(text.trim()):api.jd.parsePdf(file!),onSuccess:async result=>{setQueued(result);setParams({jd:result.job_description_id});await queryClient.invalidateQueries({queryKey:['jds']})}})
-  const job=useQuery({queryKey:['background-job',queued?.background_job_id],queryFn:()=>api.jd.getStatus(queued!.background_job_id),enabled:!!queued,refetchInterval:query=>{const status=query.state.data?.status;return status==='done'||status==='failed'?false:2000}})
+  const job=useBackgroundJobStatus(queued?.background_job_id)
   const selectedId=queued?.job_description_id??params.get('jd')
   const detail=useQuery({queryKey:['jd',selectedId],queryFn:()=>api.jd.get(selectedId!),enabled:!!selectedId&&(!queued||job.data?.status==='done')})
   useEffect(()=>{if(job.data?.status==='done'||job.data?.status==='failed')void queryClient.invalidateQueries({queryKey:['jds']})},[job.data?.status,queryClient])

@@ -1,6 +1,6 @@
-import { RedirectToSignIn, Show } from '@clerk/react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
+import { useAuth } from './hooks/useAuth'
 import { AuthPage } from './screens/AuthPage'
 import { ATSScore } from './screens/ATSScore'
 import { Dashboard } from './screens/Dashboard'
@@ -13,10 +13,9 @@ import { Settings } from './screens/Settings'
 import { Home } from './screens/Home'
 
 function ProtectedWorkspace() {
-  return <>
-    <Show when="signed-in"><AppShell /></Show>
-    <Show when="signed-out"><RedirectToSignIn /></Show>
-  </>
+  const {session,loading}=useAuth()
+  if(loading)return <div className="grid min-h-screen place-items-center text-sm text-muted" role="status">Checking your session…</div>
+  return session?<AppShell/>:<Navigate to="/sign-in" replace/>
 }
 
 export default function App(){return <Routes>

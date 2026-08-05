@@ -1,7 +1,7 @@
 import { ArrowRight, Check, FileCheck2, Layers3, PenLine } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Show, UserButton } from '@clerk/react'
 import { Logo } from '../components/Logo'
+import { useAuth } from '../hooks/useAuth'
 
 const benefits = [
   ['One source of truth', 'Keep verified experience, projects, skills, and education in one structured bank.', Layers3],
@@ -10,19 +10,19 @@ const benefits = [
 ] as const
 
 export function Home() {
+  const {session}=useAuth()
   return <div className="min-h-screen bg-canvas">
     <header className="border-b">
       <nav aria-label="Main navigation" className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 md:px-10">
         <Link to="/" aria-label="ResumeForge home"><Logo/></Link>
         <div className="flex items-center gap-2">
-          <Show when="signed-out">
+          {!session&&<>
             <Link className="button-ghost" to="/sign-in">Log in</Link>
             <Link className="button-primary" to="/sign-up">Create account</Link>
-          </Show>
-          <Show when="signed-in">
+          </>}
+          {session&&<>
             <Link className="button-primary" to="/dashboard">Open workspace <ArrowRight size={16}/></Link>
-            <UserButton/>
-          </Show>
+          </>}
         </div>
       </nav>
     </header>
@@ -34,8 +34,8 @@ export function Home() {
           <h1 className="display max-w-4xl">Build from what you’ve done.<br/><em className="font-normal text-accent">Tailor for where you’re going.</em></h1>
           <p className="mt-8 max-w-2xl text-lg text-muted">ResumeForge turns your real career evidence into focused, job-aware resumes—without inventing claims or applying AI edits behind your back.</p>
           <div className="mt-9 flex flex-wrap gap-3">
-            <Show when="signed-out"><Link className="button-accent" to="/sign-up">Start building <ArrowRight size={17}/></Link><Link className="button-secondary" to="/sign-in">I have an account</Link></Show>
-            <Show when="signed-in"><Link className="button-accent" to="/dashboard">Continue to your workspace <ArrowRight size={17}/></Link></Show>
+            {!session&&<><Link className="button-accent" to="/sign-up">Start building <ArrowRight size={17}/></Link><Link className="button-secondary" to="/sign-in">I have an account</Link></>}
+            {session&&<Link className="button-accent" to="/dashboard">Continue to your workspace <ArrowRight size={17}/></Link>}
           </div>
         </div>
         <aside className="border-y py-7 lg:border lg:p-8" aria-label="ResumeForge principles">
