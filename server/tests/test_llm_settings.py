@@ -35,7 +35,7 @@ async def test_saving_settings_encrypts_api_key() -> None:
 
 
 async def test_read_settings_only_returns_masked_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    user = User(id=uuid4(), clerk_user_id="user_a", email="a@example.com")
+    user = User(id=uuid4(), email="a@example.com")
     settings = UserLLMSettings(
         user_id=user.id,
         provider="openai",
@@ -96,7 +96,7 @@ async def test_litellm_auth_error_is_normalized_without_key(
 
 async def test_connection_endpoint_returns_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_client, "get_completion", AsyncMock(return_value="OK"))
-    user = User(id=uuid4(), clerk_user_id="user_a", email="a@example.com")
+    user = User(id=uuid4(), email="a@example.com")
 
     result = await run_connection_test(user)
 
@@ -111,7 +111,7 @@ async def test_connection_endpoint_normalizes_auth_failure(
         "get_completion",
         AsyncMock(side_effect=llm_client.LLMAuthError("credentials rejected")),
     )
-    user = User(id=uuid4(), clerk_user_id="user_a", email="a@example.com")
+    user = User(id=uuid4(), email="a@example.com")
 
     result = await run_connection_test(user)
 
@@ -129,7 +129,7 @@ async def test_settings_lookup_is_always_scoped_to_current_user() -> None:
 
 
 async def test_second_user_get_and_delete_return_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    user_b = User(id=uuid4(), clerk_user_id="user_b", email="b@example.com")
+    user_b = User(id=uuid4(), email="b@example.com")
     monkeypatch.setattr(llm_settings, "get_for_user", AsyncMock(return_value=None))
     monkeypatch.setattr(llm_settings, "delete_for_user", AsyncMock(return_value=False))
 

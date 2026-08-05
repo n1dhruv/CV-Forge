@@ -1,5 +1,4 @@
 from functools import lru_cache
-from urllib.parse import urlsplit, urlunsplit
 
 from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, computed_field, field_validator
@@ -11,14 +10,10 @@ class Settings(BaseSettings):
 
     database_url: str = Field(alias="DATABASE_URL")
     supabase_url: str = Field(alias="SUPABASE_URL")
-    supabase_service_role_key: SecretStr = Field(alias="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_secret_key: SecretStr = Field(alias="SUPABASE_SECRET_KEY")
     supabase_storage_bucket_resumes: str = Field(alias="SUPABASE_STORAGE_BUCKET_RESUMES")
     supabase_storage_bucket_jd_uploads: str = Field(alias="SUPABASE_STORAGE_BUCKET_JD_UPLOADS")
     redis_url: str = Field(alias="REDIS_URL")
-    clerk_secret_key: SecretStr = Field(alias="CLERK_SECRET_KEY")
-    clerk_jwks_url: str = Field(alias="CLERK_JWKS_URL")
-    clerk_issuer: str | None = Field(default=None, alias="CLERK_ISSUER")
-    clerk_webhook_signing_secret: SecretStr = Field(alias="CLERK_WEBHOOK_SIGNING_SECRET")
     encryption_key: SecretStr = Field(alias="ENCRYPTION_KEY")
     embedding_model: str = Field(alias="EMBEDDING_MODEL")
     github_client_id: str = Field(alias="GITHUB_CLIENT_ID")
@@ -34,11 +29,13 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def effective_clerk_issuer(self) -> str:
-        if self.clerk_issuer:
-            return self.clerk_issuer.rstrip("/")
-        parts = urlsplit(self.clerk_jwks_url)
-        return urlunsplit((parts.scheme, parts.netloc, "", "", "")).rstrip("/")
+    def supabase_auth_issuer(self) -> str:
+        return f"{self.supabase_url.rstrip('/')}/auth/v1"
+
+    @computed_field
+    @property
+    def supabase_jwks_url(self) -> str:
+        return f"{self.supabase_auth_issuer}/.well-known/jwks.json"
 
 
 @lru_cache

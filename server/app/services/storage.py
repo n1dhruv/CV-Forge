@@ -8,8 +8,8 @@ from app.core.config import Settings
 class StorageService:
     def __init__(self, settings: Settings) -> None:
         self.base_url = f"{settings.supabase_url.rstrip('/')}/storage/v1"
-        key = settings.supabase_service_role_key.get_secret_value()
-        self.headers = {"Authorization": f"Bearer {key}", "apikey": key}
+        key = settings.supabase_secret_key.get_secret_value()
+        self.headers = {"apikey": key}
         self.bucket = settings.supabase_storage_bucket_resumes
 
     async def upload(

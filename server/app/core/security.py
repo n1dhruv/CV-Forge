@@ -1,14 +1,13 @@
 import asyncio
-import json
 import time
-from typing import Annotated, Any
+from typing import Annotated
+from uuid import UUID
 
 import httpx
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt.algorithms import RSAAlgorithm
-from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -19,13 +18,13 @@ bearer = HTTPBearer(auto_error=False)
 
 
 class JWKSCache:
-    def __init__(self, ttl_seconds: int = 3600) -> None:
+    def __init__(self, ttl_seconds: int = 600) -> None:
         self.ttl_seconds = ttl_seconds
-        self._keys: dict[str, Any] = {}
+        self._keys: dict[str, jwt.PyJWK] = {}
         self._expires_at = 0.0
         self._lock = asyncio.Lock()
 
-    async def get_key(self, kid: str, url: str) -> Any:
+    async def get_key(self, kid: str, url: str) -> jwt.PyJWK:
         if time.monotonic() >= self._expires_at or kid not in self._keys:
             async with self._lock:
                 if time.monotonic() >= self._expires_at or kid not in self._keys:
@@ -33,7 +32,7 @@ class JWKSCache:
                         response = await client.get(url)
                         response.raise_for_status()
                     self._keys = {
-                        key["kid"]: RSAAlgorithm.from_jwk(json.dumps(key))
+                        key["kid"]: jwt.PyJWK.from_dict(key)
                         for key in response.json().get("keys", [])
                     }
                     self._expires_at = time.monotonic() + self.ttl_seconds
@@ -62,21 +61,37 @@ async def get_current_user(
         raise unauthorized("Bearer token is required")
     try:
         header = jwt.get_unverified_header(credentials.credentials)
-        if header.get("alg") != "RS256" or not header.get("kid"):
+        if not header.get("kid"):
             raise jwt.InvalidTokenError("Unexpected token header")
-        key = await jwks_cache.get_key(header["kid"], settings.clerk_jwks_url)
+        key = await jwks_cache.get_key(header["kid"], settings.supabase_jwks_url)
+        if header.get("alg") != key.algorithm_name:
+            raise jwt.InvalidTokenError("Unexpected signing algorithm")
         claims = jwt.decode(
             credentials.credentials,
-            key=key,
-            algorithms=["RS256"],
-            issuer=settings.effective_clerk_issuer,
-            options={"require": ["exp", "iss", "sub"]},
+            key=key.key,
+            algorithms=[key.algorithm_name],
+            issuer=settings.supabase_auth_issuer,
+            audience="authenticated",
+            options={"require": ["aud", "email", "exp", "iss", "role", "sub"]},
         )
-    except (httpx.HTTPError, jwt.PyJWTError, KeyError, ValueError) as exc:
+        if claims["role"] != "authenticated":
+            raise jwt.InvalidTokenError("Unexpected role")
+        user_id = UUID(claims["sub"])
+        email = claims["email"]
+        if not isinstance(email, str) or not email:
+            raise jwt.InvalidTokenError("Email claim is required")
+    except (httpx.HTTPError, jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
         raise unauthorized() from exc
-    user = await session.scalar(select(User).where(User.clerk_user_id == claims["sub"]))
+
+    await session.execute(
+        insert(User)
+        .values(id=user_id, email=email)
+        .on_conflict_do_nothing(index_elements=[User.id])
+    )
+    await session.commit()
+    user = await session.get(User, user_id)
     if user is None:
-        raise unauthorized("Authenticated Clerk user is not synchronized locally")
+        raise unauthorized("Authenticated user could not be initialized")
     return user
 
 
