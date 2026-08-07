@@ -22,6 +22,7 @@ export interface SkillBankItem {
   end_date: string | null
   raw_text: string | null
   tags: string[]
+  source?: 'manual' | 'resume_import' | 'github'
   created_at: string
   updated_at: string
 }
@@ -36,10 +37,11 @@ export interface JDParsed {
   responsibilities: string[]
   seniority: 'junior' | 'mid' | 'senior' | 'staff' | 'unspecified'
   ats_keywords: string[]
+  action_verbs?: string[] | null
 }
 
 export interface JDRequirement { id: string; skill: string; importance: 'required' | 'nice_to_have'; category: string | null }
-export interface JobDescription { id: string; status: JobStatus; parsed_json: JDParsed | null; requirements: JDRequirement[] }
+export interface JobDescription { id: string; status: JobStatus; parsed_json: JDParsed | null; requirements: JDRequirement[]; action_verbs?: string[] | null }
 export interface JobDescriptionListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
 export interface JDParseQueued { job_description_id: string; background_job_id: string }
 export interface BackgroundJob { status: JobStatus; result: Record<string, unknown> | null; error: string | null }
@@ -49,7 +51,7 @@ export interface LLMSettings {
   masked_key: string
   embedding_provider?: string | null
   embedding_model?: string | null
-  embedding_masked_key?: string | null
+  masked_embedding_key?: string | null
 }
 export interface LLMSettingsInput {
   provider: string
@@ -67,6 +69,41 @@ export interface LLMSettingsSaved {
 }
 export interface LLMTestResult { success: boolean; error: string | null }
 export type SupportedModels = Record<string, string[]>
+
+export interface MatchedRequirement { id: string; text: string; score: number }
+export interface MatchedBullet { id: string; text: string; score: number; requirements: MatchedRequirement[] }
+export interface MatchedItem {
+  id: string
+  type: string
+  title: string
+  org: string | null
+  start_date: string | null
+  end_date: string | null
+  bullets: MatchedBullet[]
+}
+export interface MatchResult { jd_id: string; pending_embeddings: boolean; items: MatchedItem[] }
+
+export type ResumeImportItemType = 'experience' | 'project' | 'education' | 'certification'
+export interface ResumeImportItem {
+  type: ResumeImportItemType
+  title: string
+  org: string | null
+  start_date: string | null
+  end_date: string | null
+  bullets: string[]
+}
+export interface ParsedResumeImport { items: ResumeImportItem[]; skills: string[] }
+export interface ResumeImport {
+  id: string
+  status: JobStatus
+  parsed_json: ParsedResumeImport | null
+  created_at: string
+  committed_at: string | null
+}
+export interface ResumeImportListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
+export interface ResumeImportQueued { resume_import_id: string; background_job_id: string }
+export interface ResumeImportCommit { items: ResumeImportItem[]; skills: string[] }
+export interface ResumeImportCommitResult { items: SkillBankItemDetail[] }
 
 // Demo-only types retained for later-phase screens that already exist but are out of scope here.
 export type JobState = JobStatus
