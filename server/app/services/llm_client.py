@@ -5,6 +5,7 @@ import litellm
 from sqlalchemy import select
 
 from app.core.encryption import decrypt
+from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models.settings import UserLLMSettings
 
@@ -26,6 +27,10 @@ class LLMRateLimitError(LLMError):
 
 
 class LLMProviderError(LLMError):
+    pass
+
+
+class EmbeddingProviderUnsupportedError(LLMError):
     pass
 
 
@@ -78,3 +83,59 @@ async def get_completion(user_id: UUID, messages: list[dict[str, str]], **kwargs
     if not isinstance(content, str) or not content.strip():
         raise LLMProviderError("The LLM provider returned an empty response")
     return content
+
+
+async def get_embedding(user_id: UUID, text: str) -> list[float]:
+    settings = await _settings_for_user(user_id)
+    if settings is None:
+        raise LLMNotConfiguredError("No LLM provider configured")
+
+    provider = settings.embedding_provider or settings.provider
+    model = settings.embedding_model or get_settings().embedding_model
+    encrypted_key = settings.encrypted_embedding_api_key or settings.encrypted_api_key
+    if not model:
+        raise EmbeddingProviderUnsupportedError(
+            "No embedding model is configured for this provider"
+        )
+    resolved_model = provider_model(provider, model)
+    try:
+        if litellm.get_model_info(resolved_model).get("mode") != "embedding":
+            raise EmbeddingProviderUnsupportedError(
+                f"{provider} does not support the configured embedding model"
+            )
+    except EmbeddingProviderUnsupportedError:
+        raise
+    except Exception:
+        # Unknown/custom models are allowed to reach the provider.
+        pass
+
+    try:
+        response = await litellm.aembedding(
+            model=resolved_model,
+            api_key=decrypt(encrypted_key),
+            input=text,
+        )
+    except (litellm.AuthenticationError, litellm.PermissionDeniedError):
+        raise LLMAuthError("The provider rejected the configured credentials") from None
+    except litellm.RateLimitError:
+        raise LLMRateLimitError("The provider rate limit was reached") from None
+    except litellm.BadRequestError as exc:
+        raise EmbeddingProviderUnsupportedError(
+            f"{provider} does not support the configured embedding model"
+        ) from exc
+    except (
+        litellm.APIError,
+        litellm.APIConnectionError,
+        litellm.NotFoundError,
+        litellm.ServiceUnavailableError,
+        litellm.Timeout,
+    ):
+        raise LLMProviderError("The LLM provider could not create an embedding") from None
+
+    try:
+        vector = response.data[0]["embedding"]
+    except (AttributeError, IndexError, KeyError, TypeError):
+        raise LLMProviderError("The LLM provider returned an invalid embedding") from None
+    if not isinstance(vector, list) or not vector:
+        raise LLMProviderError("The LLM provider returned an empty embedding")
+    return [float(value) for value in vector]

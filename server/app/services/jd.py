@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.jobs import BackgroundJob
-from app.models.resume import JDRequirement, JobDescription
+from app.models.resume import JDActionVerb, JDRequirement, JobDescription
 
 
 async def create_submission(
@@ -46,6 +46,16 @@ async def get_requirements(session: AsyncSession, jd_id: UUID) -> list[JDRequire
                 select(JDRequirement)
                 .where(JDRequirement.jd_id == jd_id)
                 .order_by(JDRequirement.skill)
+            )
+        ).all()
+    )
+
+
+async def get_action_verbs(session: AsyncSession, jd_id: UUID) -> list[JDActionVerb]:
+    return list(
+        (
+            await session.scalars(
+                select(JDActionVerb).where(JDActionVerb.jd_id == jd_id).order_by(JDActionVerb.verb)
             )
         ).all()
     )

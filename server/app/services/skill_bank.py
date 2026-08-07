@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
 from app.schemas.skill_bank import BulletCreate, BulletUpdate, ItemCreate, ItemUpdate
+from app.services import vector_store
 
 
 async def list_items(
@@ -45,6 +47,7 @@ async def update_item(
 
 
 async def delete_item(session: AsyncSession, item: SkillBankItem) -> None:
+    await asyncio.to_thread(vector_store.delete_vectors_for_item, item.user_id, item.id)
     await session.delete(item)
     await session.commit()
 
@@ -77,6 +80,7 @@ async def update_bullet(
     return bullet
 
 
-async def delete_bullet(session: AsyncSession, bullet: BulletPoint) -> None:
+async def delete_bullet(session: AsyncSession, user_id: UUID, bullet: BulletPoint) -> None:
+    await asyncio.to_thread(vector_store.delete_vector, user_id, bullet.id)
     await session.delete(bullet)
     await session.commit()

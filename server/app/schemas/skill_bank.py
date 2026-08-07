@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 ItemType = Literal["experience", "project", "skill", "education", "certification"]
+ItemSource = Literal["manual", "resume_import", "github"]
 
 
 class BulletCreate(BaseModel):
@@ -64,6 +65,7 @@ class ItemRead(BaseModel):
     end_date: date | None
     raw_text: str | None
     tags: list[str]
+    source: ItemSource
     created_at: datetime
     updated_at: datetime
 

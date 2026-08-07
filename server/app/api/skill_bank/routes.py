@@ -1,7 +1,8 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from arq.connections import ArqRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import CurrentUser
@@ -16,7 +17,7 @@ from app.schemas.skill_bank import (
     ItemType,
     ItemUpdate,
 )
-from app.services import skill_bank
+from app.services import embeddings, skill_bank
 
 router = APIRouter(prefix="/api/skill_bank", tags=["skill-bank"])
 Session = Annotated[AsyncSession, Depends(get_db_session)]
@@ -54,10 +55,18 @@ async def read_skill_bank_item(
 
 @router.put("/items/{item_id}", response_model=ItemRead)
 async def update_skill_bank_item(
-    item_id: UUID, payload: ItemUpdate, session: Session, current_user: CurrentUser
+    item_id: UUID,
+    payload: ItemUpdate,
+    request: Request,
+    session: Session,
+    current_user: CurrentUser,
 ) -> ItemRead:
     item = await owned_item_or_404(session, current_user, item_id)
-    return await skill_bank.update_item(session, item, payload)  # type: ignore[return-value]
+    bullet_ids = [bullet.id for bullet in item.bullet_points]
+    updated = await skill_bank.update_item(session, item, payload)
+    queue: ArqRedis = request.app.state.arq
+    await embeddings.enqueue_bullets(session, queue, current_user.id, bullet_ids)
+    return updated  # type: ignore[return-value]
 
 
 @router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -73,10 +82,17 @@ async def delete_skill_bank_item(
     "/items/{item_id}/bullets", response_model=BulletRead, status_code=status.HTTP_201_CREATED
 )
 async def create_bullet(
-    item_id: UUID, payload: BulletCreate, session: Session, current_user: CurrentUser
+    item_id: UUID,
+    payload: BulletCreate,
+    request: Request,
+    session: Session,
+    current_user: CurrentUser,
 ) -> BulletRead:
     item = await owned_item_or_404(session, current_user, item_id)
-    return await skill_bank.create_bullet(session, item, payload)  # type: ignore[return-value]
+    bullet = await skill_bank.create_bullet(session, item, payload)
+    queue: ArqRedis = request.app.state.arq
+    await embeddings.enqueue_bullets(session, queue, current_user.id, [bullet.id])
+    return bullet  # type: ignore[return-value]
 
 
 async def owned_bullet_or_404(session: AsyncSession, current_user: CurrentUser, bullet_id: UUID):
@@ -88,14 +104,21 @@ async def owned_bullet_or_404(session: AsyncSession, current_user: CurrentUser, 
 
 @router.put("/bullets/{bullet_id}", response_model=BulletRead)
 async def update_bullet(
-    bullet_id: UUID, payload: BulletUpdate, session: Session, current_user: CurrentUser
+    bullet_id: UUID,
+    payload: BulletUpdate,
+    request: Request,
+    session: Session,
+    current_user: CurrentUser,
 ) -> BulletRead:
     bullet = await owned_bullet_or_404(session, current_user, bullet_id)
-    return await skill_bank.update_bullet(session, bullet, payload)  # type: ignore[return-value]
+    updated = await skill_bank.update_bullet(session, bullet, payload)
+    queue: ArqRedis = request.app.state.arq
+    await embeddings.enqueue_bullets(session, queue, current_user.id, [bullet.id])
+    return updated  # type: ignore[return-value]
 
 
 @router.delete("/bullets/{bullet_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_bullet(bullet_id: UUID, session: Session, current_user: CurrentUser) -> Response:
     bullet = await owned_bullet_or_404(session, current_user, bullet_id)
-    await skill_bank.delete_bullet(session, bullet)
+    await skill_bank.delete_bullet(session, current_user.id, bullet)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -38,4 +38,6 @@ temp/
 
 skills-lock.json
 
-docs
+docs/*
+!docs/api/
+!docs/api/*.md
