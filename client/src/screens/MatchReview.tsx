@@ -1,11 +1,47 @@
-import { ArrowRight, Check, RotateCcw, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowLeft, Clock3, Link2 } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
-import { suggestions as seed } from '../lib/demo'
-import type { RewriteSuggestion } from '../lib/types'
-export function MatchReview(){const [items,setItems]=useState(seed);const counts=useMemo(()=>({approved:items.filter(i=>i.decision==='approved').length,rejected:items.filter(i=>i.decision==='rejected').length,pending:items.filter(i=>i.decision==='pending').length}),[items]);const decide=(id:string,decision:RewriteSuggestion['decision'])=>setItems(x=>x.map(i=>i.id===id?{...i,decision}:i));return <div className="page-enter px-5 py-8 md:px-10 md:py-12 xl:px-16"><PageHeader eyebrow="Fathom · Senior Product Engineer" title="Match & review" description="Every rewrite is a proposal. Compare it with your source evidence before deciding." action={<Link to="/editor" className={`button-primary ${counts.pending?'pointer-events-none opacity-45':''}`}>Assemble resume <ArrowRight size={16}/></Link>}/>
-  <div className="sticky top-16 z-20 mb-8 flex flex-wrap items-center justify-between gap-4 border-y bg-canvas/95 py-3 backdrop-blur lg:top-0"><p className="text-sm"><strong>{counts.pending}</strong> decisions remaining</p><div className="flex gap-4 text-xs font-semibold"><span className="text-success">{counts.approved} approved</span><span className="text-danger">{counts.rejected} rejected</span></div></div>
-  <div className="space-y-8">{items.map((item,index)=><article key={item.id} className={`border-y transition-colors ${item.decision==='approved'?'border-success/40 bg-success/5':item.decision==='rejected'?'border-danger/40 opacity-60':''}`}><header className="flex flex-wrap items-center justify-between gap-4 px-1 py-4"><div><p className="eyebrow">{item.section} · Selection {String(index+1).padStart(2,'0')}</p><p className="mt-1 text-sm font-semibold">{item.relevance}% relevance</p></div><div className="flex flex-wrap gap-1.5">{item.matchedKeywords.map(x=><span className="tag" key={x}>{x}</span>)}</div></header><div className="grid border-y lg:grid-cols-2"><div className="p-5 lg:border-r"><p className="eyebrow mb-3">Original evidence</p><p className="leading-7 text-muted">{item.sourceBullet.text}</p></div><div className="bg-surface p-5"><p className="eyebrow mb-3">Tailored proposal</p><Diff original={item.sourceBullet.text} tailored={item.tailoredText}/></div></div><footer className="flex items-center justify-between gap-4 px-1 py-4"><p className={`text-sm font-semibold ${item.decision==='approved'?'text-success':item.decision==='rejected'?'text-danger':'text-muted'}`}>{item.decision==='pending'?'Awaiting your decision':item.decision==='approved'?'Approved for this version':'Excluded from this version'}</p><div className="flex gap-2">{item.decision!=='pending'&&<button className="button-ghost" onClick={()=>decide(item.id,'pending')}><RotateCcw size={15}/>Reset</button>}<button aria-pressed={item.decision==='rejected'} className="button-secondary text-danger" onClick={()=>decide(item.id,'rejected')}><X size={16}/>Reject</button><button aria-pressed={item.decision==='approved'} className="button-primary" onClick={()=>decide(item.id,'approved')}><Check size={16}/>Approve</button></div></footer></article>)}</div>
-  </div>}
-function Diff({original,tailored}:{original:string;tailored:string}){const oldWords=new Set(original.toLowerCase().replace(/[,.]/g,'').split(' '));return <p className="leading-7">{tailored.split(' ').map((word,i)=><span key={`${word}-${i}`} className={!oldWords.has(word.toLowerCase().replace(/[,.]/g,''))?'bg-accent-soft text-accent decoration-clone':''}>{word} </span>)}</p>}
+import { ScreenState } from '../components/ScreenState'
+import { useApi } from '../hooks/useApi'
+import type { MatchedBullet, MatchedItem } from '../lib/types'
+
+const date = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short' })
+const formatDate = (value: string | null) => value ? date.format(new Date(`${value}T00:00:00`)) : 'Present'
+
+export function MatchReview() {
+  const api = useApi()
+  const [params] = useSearchParams()
+  const jdId = params.get('jd')
+  const match = useQuery({
+    queryKey: ['match', jdId],
+    queryFn: () => api.match(jdId!),
+    enabled: !!jdId,
+    refetchOnWindowFocus: false,
+  })
+
+  if (!jdId) return <div className="px-5 py-8 md:px-10 xl:px-16"><ScreenState kind="empty" title="Choose a job description first" detail="Open a parsed job description, then start matching from its detail view."/><Link className="button-primary mt-6" to="/job-description">Open Job Descriptions</Link></div>
+  if (match.isPending) return <div className="px-5 py-8 md:px-10 xl:px-16"><ScreenState kind="loading" title="Matching your evidence…" detail="Comparing each job requirement with your saved proof points."/></div>
+  if (match.isError) return <div className="px-5 py-8 md:px-10 xl:px-16"><ScreenState kind="error" title="Match unavailable" detail={match.error.message} onRetry={() => void match.refetch()}/></div>
+
+  const count = match.data.items.reduce((total, item) => total + item.bullets.length, 0)
+  return <div className="page-enter px-5 py-8 pb-20 md:px-10 md:py-12 xl:px-16">
+    <PageHeader eyebrow="Evidence fit" title="Match & Review" description="See which saved proof points best support this role and why. Nothing is rewritten or added to a resume here." action={<Link className="button-secondary" to={`/job-description?jd=${jdId}`}><ArrowLeft size={16} aria-hidden="true"/>Back to JD</Link>}/>
+
+    {match.data.pending_embeddings ? <div className="mb-8 flex items-start gap-3 border-l-2 border-warning bg-surface px-5 py-4" role="status" aria-live="polite"><Clock3 className="mt-0.5 shrink-0 text-warning" size={18} aria-hidden="true"/><div><p className="font-semibold">Still processing your skill bank</p><p className="mt-1 text-sm text-muted">Some proof points do not have embeddings yet, so this match may be incomplete. Try again shortly.</p><button className="mt-3 text-sm font-semibold text-accent underline underline-offset-4" onClick={() => void match.refetch()}>Check again</button></div></div> : null}
+
+    {count ? <><div className="mb-7 flex items-end justify-between gap-4 border-b pb-4"><div><p className="eyebrow">Evidence ledger</p><p className="mt-1 text-sm text-muted">{count} proof {count === 1 ? 'point' : 'points'} across {match.data.items.length} sources</p></div><p className="hidden max-w-sm text-right text-xs text-muted sm:block">Labels summarize relative fit; raw vector scores stay out of the way.</p></div><div className="space-y-10">{match.data.items.map((item, index) => <MatchedSource key={item.id} item={item} index={index}/>)}</div></> : <div className="grid min-h-72 place-items-center border-y text-center"><div className="max-w-md"><p className="font-display text-3xl">No matching proof points yet.</p><p className="mt-2 text-sm text-muted">Add bullets to your Skill Bank, or wait for new embeddings to finish processing.</p><Link className="button-secondary mt-5" to="/skill-bank">Open Skill Bank</Link></div></div>}
+  </div>
+}
+
+function MatchedSource({ item, index }: { item: MatchedItem; index: number }) {
+  return <article className="grid gap-5 lg:grid-cols-[12rem_minmax(0,1fr)]">
+    <header className="lg:sticky lg:top-8 lg:self-start"><p className="font-mono text-xs text-accent">SOURCE {String(index + 1).padStart(2, '0')}</p><h2 className="mt-2 section-title">{item.title}</h2><p className="mt-1 text-sm text-muted">{item.org || 'Independent'}{item.start_date ? ` · ${formatDate(item.start_date)}—${formatDate(item.end_date)}` : ''}</p><p className="mt-3 text-xs font-semibold uppercase tracking-[.14em] text-muted">{item.type}</p></header>
+    <ol className="divide-y border-y">{item.bullets.map((bullet, bulletIndex) => <MatchedEvidence key={bullet.id} bullet={bullet} index={bulletIndex}/>)}</ol>
+  </article>
+}
+
+function MatchedEvidence({ bullet, index }: { bullet: MatchedBullet; index: number }) {
+  const strong = bullet.score >= .72
+  return <li className="grid gap-4 py-6 sm:grid-cols-[2.5rem_minmax(0,1fr)]"><span className="font-mono text-xs text-muted" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><div><div className="mb-3 flex flex-wrap items-center gap-2"><span className={`border-l-2 px-2 py-0.5 text-xs font-semibold ${strong ? 'border-success text-success' : 'border-accent text-accent'}`}>{strong ? 'Strong match' : 'Good match'}</span></div><p className="leading-7">{bullet.text}</p><div className="mt-4 border-l pl-4"><p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.12em] text-muted"><Link2 size={13} aria-hidden="true"/>Matched requirements</p><ul className="space-y-1.5">{bullet.requirements.slice(0, 3).map(requirement => <li className="text-sm text-muted" key={requirement.id}>{requirement.text}</li>)}</ul></div></div></li>
+}

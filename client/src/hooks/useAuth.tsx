@@ -11,7 +11,7 @@ export function AuthProvider({children}:{children:ReactNode}){
   useEffect(()=>{
     void supabase.auth.getSession().then(({data})=>{setSession(data.session);setLoading(false)})
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event,next)=>{
-      if(event==='SIGNED_IN'||event==='SIGNED_OUT')queryClient.clear()
+      if(event==='SIGNED_OUT')queryClient.clear()
       setSession(next);setLoading(false)
     })
     return()=>subscription.unsubscribe()

@@ -11,6 +11,7 @@ import { MatchReview } from './screens/MatchReview'
 import { SkillBank } from './screens/SkillBank'
 import { Settings } from './screens/Settings'
 import { Home } from './screens/Home'
+import { ResumeImport } from './screens/ResumeImport'
 
 function ProtectedWorkspace() {
   const {session,loading}=useAuth()
@@ -28,6 +29,7 @@ export default function App(){return <Routes>
     <Route path="job-description" element={<JDInput/>}/>
     <Route path="settings" element={<Settings/>}/>
     <Route path="review" element={<MatchReview/>}/>
+    <Route path="resume-import" element={<ResumeImport/>}/>
     <Route path="editor" element={<LatexEditor/>}/>
     <Route path="integrations" element={<Integrations/>}/>
     <Route path="ats" element={<ATSScore/>}/>

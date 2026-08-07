@@ -12,9 +12,10 @@ export function Settings() {
   const api = useApi()
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
-  const [testResult, setTestResult] = useState<{ success: boolean; error: string | null } | null>(null)
+  const [testResult, setTestResult] = useState<{ kind: 'chat' | 'embedding'; success: boolean; error: string | null } | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const supported = useQuery({ queryKey: ['supported-models'], queryFn: api.llmSettings.supportedModels })
+  const supportedEmbeddings = useQuery({ queryKey: ['supported-embedding-models'], queryFn: api.llmSettings.supportedEmbeddingModels })
   const current = useQuery({
     queryKey: ['llm-settings'],
     queryFn: api.llmSettings.get,
@@ -40,8 +41,13 @@ export function Settings() {
   })
   const test = useMutation({
     mutationFn: api.llmSettings.test,
-    onSuccess: setTestResult,
-    onError: error => setTestResult({ success: false, error: error.message }),
+    onSuccess: result => setTestResult({ kind: 'chat', ...result }),
+    onError: error => setTestResult({ kind: 'chat', success: false, error: error.message }),
+  })
+  const testEmbedding = useMutation({
+    mutationFn: api.llmSettings.testEmbedding,
+    onSuccess: result => setTestResult({ kind: 'embedding', ...result }),
+    onError: error => setTestResult({ kind: 'embedding', success: false, error: error.message }),
   })
 
   if (current.isPending) return <div className="px-5 py-8 md:px-10 xl:px-16"><ScreenState kind="loading" title="Loading Provider Settings…" detail="Checking your saved configuration."/></div>
@@ -53,8 +59,10 @@ export function Settings() {
     {configured && !editing ? <SavedSettings
       settings={configured}
       testPending={test.isPending}
+      embeddingTestPending={testEmbedding.isPending}
       testResult={testResult}
       onTest={() => test.mutate()}
+      onTestEmbedding={() => testEmbedding.mutate()}
       onEdit={() => setEditing(true)}
       confirmRemove={confirmRemove}
       onConfirmRemove={() => setConfirmRemove(true)}
@@ -66,6 +74,10 @@ export function Settings() {
       supportedPending={supported.isPending}
       supportedError={supported.error?.message}
       onRetrySupported={() => void supported.refetch()}
+      supportedEmbeddings={supportedEmbeddings.data ?? {}}
+      embeddingsPending={supportedEmbeddings.isPending}
+      embeddingsError={supportedEmbeddings.error?.message}
+      onRetryEmbeddings={() => void supportedEmbeddings.refetch()}
       current={configured}
       pending={save.isPending}
       error={save.error?.message}
@@ -78,8 +90,10 @@ export function Settings() {
 interface SavedSettingsProps {
   settings: LLMSettings
   testPending: boolean
-  testResult: { success: boolean; error: string | null } | null
+  embeddingTestPending: boolean
+  testResult: { kind: 'chat' | 'embedding'; success: boolean; error: string | null } | null
   onTest: () => void
+  onTestEmbedding: () => void
   onEdit: () => void
   confirmRemove: boolean
   onConfirmRemove: () => void
@@ -88,25 +102,25 @@ interface SavedSettingsProps {
   removePending: boolean
 }
 
-function SavedSettings({ settings, testPending, testResult, onTest, onEdit, confirmRemove, onConfirmRemove, onCancelRemove, onRemove, removePending }: SavedSettingsProps) {
+function SavedSettings({ settings, testPending, embeddingTestPending, testResult, onTest, onTestEmbedding, onEdit, confirmRemove, onConfirmRemove, onCancelRemove, onRemove, removePending }: SavedSettingsProps) {
   return <section className="max-w-3xl border-y py-7">
     <div className="grid gap-8 md:grid-cols-2">
-      <SavedConfiguration title="Chat & Completions" provider={settings.provider} model={settings.model} maskedKey={settings.masked_key}/>
-      <SavedConfiguration title="Embeddings" provider={settings.embedding_provider} model={settings.embedding_model} maskedKey={settings.embedding_masked_key}/>
+      <SavedConfiguration title="Chat & Completions" provider={settings.provider} model={settings.model} maskedKey={settings.masked_key} onTest={onTest} testPending={testPending}/>
+      <SavedConfiguration title="Embedding provider (for matching)" provider={settings.embedding_provider} model={settings.embedding_model} maskedKey={settings.masked_embedding_key} onTest={onTestEmbedding} testPending={embeddingTestPending}/>
     </div>
     <div className="mt-8 flex flex-wrap gap-2">
-      <button className="button-primary" onClick={onTest} disabled={testPending}><KeyRound size={16} aria-hidden="true"/>{testPending ? 'Testing…' : 'Test Connection'}</button>
       <button className="button-secondary" onClick={onEdit}>Update Settings</button>
       {confirmRemove ? <><button className="button-ghost text-danger" onClick={onRemove} disabled={removePending}><Trash2 size={16} aria-hidden="true"/>{removePending ? 'Removing…' : 'Confirm Remove'}</button><button className="button-ghost" onClick={onCancelRemove}>Keep Settings</button></> : <button className="button-ghost text-danger" onClick={onConfirmRemove}><Trash2 size={16} aria-hidden="true"/>Remove Settings</button>}
     </div>
-    {testResult ? <p className={`mt-5 flex items-start gap-2 text-sm ${testResult.success ? 'text-success' : 'text-danger'}`} role="status" aria-live="polite">{testResult.success ? <Check size={16} className="mt-0.5 shrink-0" aria-hidden="true"/> : <X size={16} className="mt-0.5 shrink-0" aria-hidden="true"/>}{testResult.success ? 'Connection works.' : testResult.error || 'The provider rejected the connection. Check the model and API key.'}</p> : null}
+    {testResult ? <p className={`mt-5 flex items-start gap-2 text-sm ${testResult.success ? 'text-success' : 'text-danger'}`} role="status" aria-live="polite">{testResult.success ? <Check size={16} className="mt-0.5 shrink-0" aria-hidden="true"/> : <X size={16} className="mt-0.5 shrink-0" aria-hidden="true"/>}{testResult.success ? `${testResult.kind === 'embedding' ? 'Embedding' : 'Chat'} connection works.` : testResult.error || 'The provider rejected the connection. Check the model and API key.'}</p> : null}
   </section>
 }
 
-function SavedConfiguration({ title, provider, model, maskedKey }: { title: string; provider?: string | null; model?: string | null; maskedKey?: string | null }) {
+function SavedConfiguration({ title, provider, model, maskedKey, onTest, testPending }: { title: string; provider?: string | null; model?: string | null; maskedKey?: string | null; onTest: () => void; testPending: boolean }) {
   return <div>
     <p className="eyebrow">{title}</p>
-    {provider && model ? <div className="mt-3 rounded-lg border bg-raised p-4"><p className="font-semibold capitalize">{provider}</p><p className="mt-1 break-words font-mono text-sm" translate="no">{model}</p><p className="mt-3 font-mono text-xs text-muted" translate="no">{maskedKey}</p></div> : <p className="mt-3 text-sm text-muted">Not configured.</p>}
+    {provider && model ? <div className="mt-3 border-l-2 border-accent bg-raised p-4"><p className="font-semibold capitalize">{provider}</p><p className="mt-1 break-words font-mono text-sm" translate="no">{model}</p><p className="mt-3 font-mono text-xs text-muted" translate="no">{maskedKey}</p></div> : <p className="mt-3 text-sm text-muted">Not configured. ResumeForge will try the chat provider and key; this fails for providers without embeddings, such as Anthropic.</p>}
+    <button className="button-secondary mt-4" onClick={onTest} disabled={testPending}><KeyRound size={16} aria-hidden="true"/>{testPending ? 'Testing…' : 'Test Connection'}</button>
   </div>
 }
 
@@ -115,6 +129,10 @@ interface SettingsFormProps {
   supportedPending: boolean
   supportedError?: string
   onRetrySupported: () => void
+  supportedEmbeddings: SupportedModels
+  embeddingsPending: boolean
+  embeddingsError?: string
+  onRetryEmbeddings: () => void
   current?: LLMSettings
   pending: boolean
   error?: string
@@ -122,7 +140,7 @@ interface SettingsFormProps {
   onSave: (value: LLMSettingsInput) => void
 }
 
-function SettingsForm({ supported, supportedPending, supportedError, onRetrySupported, current, pending, error, onCancel, onSave }: SettingsFormProps) {
+function SettingsForm({ supported, supportedPending, supportedError, onRetrySupported, supportedEmbeddings, embeddingsPending, embeddingsError, onRetryEmbeddings, current, pending, error, onCancel, onSave }: SettingsFormProps) {
   const [chat, setChat] = useState<ModelSelection | null>(current ? { provider: current.provider, model: current.model } : null)
   const [embedding, setEmbedding] = useState<ModelSelection | null>(current?.embedding_provider && current.embedding_model ? { provider: current.embedding_provider, model: current.embedding_model } : null)
   const [apiKey, setApiKey] = useState('')
@@ -158,9 +176,10 @@ function SettingsForm({ supported, supportedPending, supportedError, onRetrySupp
     </section>
 
     <section className="mt-10 border-t pt-8" aria-labelledby="embedding-settings-title">
-      <div className="mb-5"><p className="eyebrow">Optional</p><h2 id="embedding-settings-title" className="mt-2 section-title">Embeddings</h2><p className="mt-2 text-sm text-muted">Use a separate provider and key for vector embeddings when your chat provider does not support them.</p></div>
-      <ModelProviderPicker id="embedding-model" label="Provider & Model" description="Choose the model used to create vector representations." purpose="embedding" value={embedding} supportedModels={supported} loading={supportedPending} error={supportedError} onRetry={onRetrySupported} onChange={setEmbedding}/>
-      <label className="mt-5 block text-sm font-semibold" htmlFor="embedding-api-key">Embedding API Key <span className="font-normal text-muted">(required after choosing a model)</span><input id="embedding-api-key" name="embedding-api-key" className="field mt-2 font-mono" type="password" required={!!embedding} autoComplete="new-password" spellCheck={false} value={embeddingApiKey} onChange={event => setEmbeddingApiKey(event.target.value)} placeholder={current?.embedding_masked_key ? 'Enter a new embedding key to update…' : 'Paste an embedding provider key…'}/></label>
+      <div className="mb-5"><p className="eyebrow">Optional</p><h2 id="embedding-settings-title" className="mt-2 section-title">Embedding provider (for matching)</h2><p className="mt-2 text-sm text-muted">Matching needs vector embeddings, which can come from a different provider than chat. Anthropic, for example, offers Claude for text generation but no embedding model.</p></div>
+      <ModelProviderPicker id="embedding-model" label="Provider & Model" description="Choose the model used to compare your evidence with job requirements." purpose="embedding" value={embedding} supportedModels={supportedEmbeddings} loading={embeddingsPending} error={embeddingsError} onRetry={onRetryEmbeddings} onChange={setEmbedding}/>
+      <label className="mt-5 block text-sm font-semibold" htmlFor="embedding-api-key">Embedding API Key <span className="font-normal text-muted">(required after choosing a model)</span><input id="embedding-api-key" name="embedding-api-key" className="field mt-2 font-mono" type="password" required={!!embedding} autoComplete="new-password" spellCheck={false} value={embeddingApiKey} onChange={event => setEmbeddingApiKey(event.target.value)} placeholder={current?.masked_embedding_key ? 'Enter a new embedding key to update…' : 'Paste an embedding provider key…'}/></label>
+      {!embedding ? <p className="mt-4 border-l-2 border-line pl-4 text-sm text-muted">Leave this unset to reuse your chat provider’s key. That fallback will fail when the chat provider does not support embeddings, such as Anthropic.</p> : null}
     </section>
 
     {error ? <p className="mt-5 text-sm text-danger" role="alert">{error} Check both provider configurations and try again.</p> : null}

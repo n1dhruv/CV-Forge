@@ -1,7 +1,8 @@
 import type {
   BackgroundJob, BulletPoint, BulletPointInput, JobDescription, JobDescriptionListItem,
   JDParseQueued, LLMSettings, LLMSettingsInput, LLMSettingsSaved, LLMTestResult, SkillBankItem,
-  SkillBankItemDetail, SkillBankItemInput, SupportedModels,
+  MatchResult, ResumeImport, ResumeImportCommit, ResumeImportCommitResult, ResumeImportListItem,
+  ResumeImportQueued, SkillBankItemDetail, SkillBankItemInput, SupportedModels,
 } from './types'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -46,7 +47,9 @@ export function createApiClient(getToken: GetToken) {
       save: (settings: LLMSettingsInput) => request<LLMSettingsSaved>('/api/settings/llm', { method: 'POST', body: JSON.stringify(settings) }),
       remove: () => request<void>('/api/settings/llm', { method: 'DELETE' }),
       test: () => request<LLMTestResult>('/api/settings/llm/test', { method: 'POST' }),
+      testEmbedding: () => request<LLMTestResult>('/api/settings/llm/test-embedding', { method: 'POST' }),
       supportedModels: () => request<SupportedModels>('/api/settings/llm/supported-models'),
+      supportedEmbeddingModels: () => request<SupportedModels>('/api/settings/llm/supported-embedding-models'),
     },
     jd: {
       parseText: (rawText: string) => request<JDParseQueued>('/api/jd/parse', { method: 'POST', body: JSON.stringify({ raw_text: rawText }) }),
@@ -54,6 +57,13 @@ export function createApiClient(getToken: GetToken) {
       list: () => request<JobDescriptionListItem[]>('/api/jd'),
       get: (id: string) => request<JobDescription>(`/api/jd/${id}`),
       getStatus: (id: string) => request<BackgroundJob>(`/api/background_jobs/${id}`),
+    },
+    match: (jdId: string) => request<MatchResult>(`/api/match/${jdId}`, { method: 'POST' }),
+    resumeImports: {
+      create: (file: File) => { const body = new FormData(); body.append('file', file); return request<ResumeImportQueued>('/api/resume_imports', { method: 'POST', body }) },
+      list: () => request<ResumeImportListItem[]>('/api/resume_imports'),
+      get: (id: string) => request<ResumeImport>(`/api/resume_imports/${id}`),
+      commit: (id: string, payload: ResumeImportCommit) => request<ResumeImportCommitResult>(`/api/resume_imports/${id}/commit`, { method: 'POST', body: JSON.stringify(payload) }),
     },
   }
 }
