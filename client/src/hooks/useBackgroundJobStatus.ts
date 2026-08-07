@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import type { BackgroundJob, JobStatus } from '../lib/types'
-import { supabase } from '../lib/supabase'
+import type { BackgroundJob, JobStatus } from '@/lib/types'
+import { supabase } from '@/lib/supabase'
 import { useApi } from './useApi'
 
 type RealtimeState = 'connecting' | 'connected' | 'failed'
