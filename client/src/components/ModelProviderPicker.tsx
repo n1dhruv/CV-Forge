@@ -1,6 +1,6 @@
 import { Check, ChevronRight, Search, Settings2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import type { SupportedModels } from '../lib/types'
+import type { SupportedModels } from '@/lib/types'
 
 export interface ModelSelection {
   provider: string
@@ -160,7 +160,6 @@ export function ModelProviderPicker({
       className="flex min-h-16 w-full touch-manipulation items-center justify-between gap-4 rounded-lg border bg-raised px-4 py-3 text-left transition-colors hover:border-accent hover:bg-surface"
       aria-haspopup="dialog"
       aria-expanded={open}
-      aria-invalid={validationError ? 'true' : undefined}
       aria-describedby={validationError ? `${id}-validation` : undefined}
       onClick={() => setOpen(true)}
     >
