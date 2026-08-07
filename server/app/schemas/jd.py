@@ -19,6 +19,7 @@ class JDParsed(BaseModel):
     responsibilities: list[str]
     seniority: Literal["junior", "mid", "senior", "staff", "unspecified"]
     ats_keywords: list[str]
+    action_verbs: list[str]
 
 
 class JDParseQueued(BaseModel):
@@ -38,6 +39,7 @@ class JDDetail(BaseModel):
     status: Literal["queued", "running", "done", "failed"]
     parsed_json: JDParsed | None
     requirements: list[JDRequirementRead]
+    action_verbs: list[str]
 
 
 class JDListItem(BaseModel):

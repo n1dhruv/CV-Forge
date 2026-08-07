@@ -8,12 +8,14 @@ from sqlalchemy.dialects import postgresql
 from app.api.settings.llm import (
     delete_llm_settings,
     read_llm_settings,
+    test_embedding_settings as run_embedding_connection_test,
     test_llm_settings as run_connection_test,
 )
 from app.models.settings import UserLLMSettings
 from app.models.user import User
 from app.schemas.llm_settings import LLMSettingsCreate
 from app.services import llm_client, llm_settings
+from types import SimpleNamespace
 
 
 async def test_saving_settings_encrypts_api_key() -> None:
@@ -118,6 +120,17 @@ async def test_connection_endpoint_normalizes_auth_failure(
     assert result.model_dump() == {"success": False, "error": "credentials rejected"}
 
 
+async def test_embedding_connection_endpoint_uses_embedding_client(monkeypatch) -> None:
+    embedding = AsyncMock(return_value=[0.1, 0.2])
+    monkeypatch.setattr(llm_client, "get_embedding", embedding)
+    user = User(id=uuid4(), email="a@example.com")
+
+    result = await run_embedding_connection_test(user)
+
+    assert result.model_dump() == {"success": True, "error": None}
+    embedding.assert_awaited_once_with(user.id, "Resume matching connection test")
+
+
 async def test_settings_lookup_is_always_scoped_to_current_user() -> None:
     session = AsyncMock()
     session.scalar.return_value = None
@@ -148,3 +161,38 @@ def test_provider_model_uses_litellm_prefixes() -> None:
         "anthropic/claude-haiku-4-5"
     )
     assert llm_client.provider_model("custom", "openrouter/model") == "openrouter/model"
+
+
+async def test_get_embedding_uses_explicit_embedding_configuration(monkeypatch) -> None:
+    user_id = uuid4()
+    settings = UserLLMSettings(
+        user_id=user_id,
+        provider="anthropic",
+        model="claude-haiku-4-5",
+        encrypted_api_key=llm_settings.encrypt("chat-key"),
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        encrypted_embedding_api_key=llm_settings.encrypt("embedding-key"),
+    )
+    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
+    monkeypatch.setattr(llm_client.litellm, "get_model_info", lambda model: {"mode": "embedding"})
+    embedding = AsyncMock(return_value=SimpleNamespace(data=[{"embedding": [0.1, 0.2]}]))
+    monkeypatch.setattr(llm_client.litellm, "aembedding", embedding)
+
+    assert await llm_client.get_embedding(user_id, "Built APIs") == [0.1, 0.2]
+    assert embedding.await_args.kwargs["model"] == "openai/text-embedding-3-small"
+    assert embedding.await_args.kwargs["api_key"] == "embedding-key"
+
+
+async def test_unsupported_fallback_embedding_model_is_specific(monkeypatch) -> None:
+    settings = UserLLMSettings(
+        user_id=uuid4(),
+        provider="anthropic",
+        model="claude-haiku-4-5",
+        encrypted_api_key=llm_settings.encrypt("chat-key"),
+    )
+    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
+    monkeypatch.setattr(llm_client.litellm, "get_model_info", lambda model: {"mode": "chat"})
+
+    with pytest.raises(llm_client.EmbeddingProviderUnsupportedError):
+        await llm_client.get_embedding(settings.user_id, "Built APIs")

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models.jobs import BackgroundJob
-from app.models.resume import JDRequirement, JobDescription
+from app.models.resume import JDActionVerb, JDRequirement, JobDescription
 from app.schemas.jd import JDParsed
 from app.services import llm_client
 from app.services.storage import StorageService
@@ -53,10 +53,14 @@ def prompt_for(raw_text: str) -> str:
   "nice_to_have_skills": ["string"],
   "responsibilities": ["string"],
   "seniority": "junior | mid | senior | staff | unspecified",
-  "ats_keywords": ["string"]
+  "ats_keywords": ["string"],
+  "action_verbs": ["string"]
 }}
 Return only the valid JSON object: no preamble, markdown fences, or commentary.
 Use an empty array, never null or an omitted field, when a list category has no values.
+Extract strong action verbs actually used in responsibilities or requirements. Deduplicate them
+and normalize inflections to a base form where reasonable (for example, "manage" instead of
+"managing", "managed", and "manages"). Do not invent verbs absent from the job description.
 
 Job description:
 {capped_jd_text(raw_text)}"""
@@ -127,6 +131,10 @@ async def _validated_completion(user_id: UUID, raw_text: str) -> JDParsed | None
                     ]
                 )
     return None
+
+
+def deduplicate(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(value.strip().casefold() for value in values if value.strip()))
 
 
 async def parse_jd_task(
@@ -219,6 +227,7 @@ async def parse_jd_task(
             if current_jd is None or current_job is None:
                 return
             parsed_data = parsed.model_dump()
+            parsed_data["action_verbs"] = deduplicate(parsed.action_verbs)
             current_jd.parsed_json = parsed_data
             current_jd.status = "done"
             session.add_all(
@@ -230,12 +239,17 @@ async def parse_jd_task(
                     )
                     for skill in skills
                 ]
+                + [
+                    JDActionVerb(jd_id=parsed_jd_id, verb=verb)
+                    for verb in parsed_data["action_verbs"]
+                ]
             )
             current_job.status = "done"
             current_job.error = None
             current_job.result = {
                 "required_skills": len(parsed.required_skills),
                 "nice_to_have_skills": len(parsed.nice_to_have_skills),
+                "action_verbs": len(parsed_data["action_verbs"]),
             }
             await session.commit()
         return

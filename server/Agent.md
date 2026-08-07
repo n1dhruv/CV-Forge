@@ -6,7 +6,7 @@ Read `/AGENTS.md` (root) first for project-wide rules. This file covers backend-
  
 - FastAPI (Python 3.11+)
 - SQLAlchemy 2.x (async) + Alembic for migrations
-- PostgreSQL 15+ with the `pgvector` extension
+- PostgreSQL 15+ for application data and Pinecone for embeddings
 - Celery or `arq` for background task workers, Redis as broker/backend
 - Tectonic for sandboxed LaTeX compilation
 - Pydantic v2 for request/response schemas
@@ -68,4 +68,5 @@ Read `/AGENTS.md` (root) first for project-wide rules. This file covers backend-
 - `ruff check .`
 - `black --check .`
 - `alembic upgrade head` runs cleanly against a fresh test database if migrations were added/changed
+- Any new endpoint or new `background_jobs.job_type` must be documented in `/docs/api` in the same PR that introduces it.
  

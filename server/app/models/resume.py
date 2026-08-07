@@ -53,6 +53,36 @@ class JDRequirement(Base):
     category: Mapped[str | None] = mapped_column(Text)
 
 
+class JDActionVerb(Base):
+    __tablename__ = "jd_action_verbs"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=sql_text("uuid_generate_v4()")
+    )
+    jd_id: Mapped[UUID] = mapped_column(ForeignKey("job_descriptions.id", ondelete="CASCADE"))
+    verb: Mapped[str] = mapped_column(Text)
+
+
+class ResumeImport(Base):
+    __tablename__ = "resume_imports"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('queued','running','done','failed')", name="resume_imports_status_check"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=sql_text("uuid_generate_v4()")
+    )
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    source_file_url: Mapped[str | None] = mapped_column(Text)
+    raw_text: Mapped[str | None] = mapped_column(Text)
+    parsed_json: Mapped[dict | None] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text, server_default=sql_text("'queued'"))
+    created_at: Mapped[datetime] = mapped_column(server_default=sql_text("now()"))
+    committed_at: Mapped[datetime | None]
+
+
 class ResumeVersion(Base):
     __tablename__ = "resume_versions"
     id: Mapped[UUID] = mapped_column(

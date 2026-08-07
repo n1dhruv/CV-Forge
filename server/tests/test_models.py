@@ -30,3 +30,11 @@ def test_all_datetime_columns_are_timezone_aware() -> None:
     assert [
         name for name, column_type in datetime_columns.items() if not column_type.timezone
     ] == []
+
+
+def test_phase_three_metadata_uses_pinecone_not_postgres_vectors() -> None:
+    assert "embedding" not in Base.metadata.tables["skill_bank_items"].columns
+    assert "embedding" not in Base.metadata.tables["bullet_points"].columns
+    assert "jd_action_verbs" in Base.metadata.tables
+    assert "resume_imports" in Base.metadata.tables
+    assert "source" in Base.metadata.tables["skill_bank_items"].columns

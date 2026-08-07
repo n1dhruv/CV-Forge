@@ -14,3 +14,6 @@ class UserLLMSettings(TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text)
     encrypted_api_key: Mapped[str] = mapped_column(Text)
+    embedding_provider: Mapped[str | None] = mapped_column(Text)
+    embedding_model: Mapped[str | None] = mapped_column(Text)
+    encrypted_embedding_api_key: Mapped[str | None] = mapped_column(Text)

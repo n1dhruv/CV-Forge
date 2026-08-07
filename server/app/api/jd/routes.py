@@ -113,12 +113,14 @@ async def read_jd(jd_id: UUID, session: Session, current_user: CurrentUser) -> J
     if description is None:
         raise HTTPException(status_code=404, detail="Job description not found")
     requirements = await jd.get_requirements(session, jd_id) if description.status == "done" else []
+    verbs = await jd.get_action_verbs(session, jd_id) if description.status == "done" else []
+    parsed_json = description.parsed_json
+    if parsed_json is not None and "action_verbs" not in parsed_json:
+        parsed_json = {**parsed_json, "action_verbs": []}
     return JDDetail(
         id=description.id,
         status=description.status,
-        parsed_json=(
-            JDParsed.model_validate(description.parsed_json) if description.parsed_json else None
-        ),
+        parsed_json=(JDParsed.model_validate(parsed_json) if parsed_json else None),
         requirements=[
             JDRequirementRead(
                 id=requirement.id,
@@ -128,4 +130,5 @@ async def read_jd(jd_id: UUID, session: Session, current_user: CurrentUser) -> J
             )
             for requirement in requirements
         ],
+        action_verbs=[item.verb for item in verbs],
     )

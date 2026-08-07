@@ -9,6 +9,8 @@ from sqlalchemy import text
 
 from app.api.jd import router as jd_router
 from app.api.jobs import router as jobs_router
+from app.api.match import router as match_router
+from app.api.resume_imports import router as resume_imports_router
 from app.api.skill_bank import router as skill_bank_router
 from app.api.settings import router as llm_settings_router
 from app.api.storage import router as storage_router
@@ -48,6 +50,8 @@ app.include_router(storage_router)
 app.include_router(llm_settings_router)
 app.include_router(jd_router)
 app.include_router(jobs_router)
+app.include_router(match_router)
+app.include_router(resume_imports_router)
 
 
 @app.get("/health")

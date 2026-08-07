@@ -38,7 +38,8 @@ def parsed_output() -> str:
         "nice_to_have_skills": ["FastAPI"],
         "responsibilities": ["Build APIs"],
         "seniority": "senior",
-        "ats_keywords": ["async", "REST"]
+        "ats_keywords": ["async", "REST"],
+        "action_verbs": ["Build", "build", "Optimize"]
     }"""
 
 
@@ -67,15 +68,22 @@ async def test_successful_pasted_text_parse_persists_validated_result(
         "responsibilities": ["Build APIs"],
         "seniority": "senior",
         "ats_keywords": ["async", "REST"],
+        "action_verbs": ["build", "optimize"],
     }
-    requirements = final_session.add_all.call_args.args[0]
+    persisted = final_session.add_all.call_args.args[0]
+    requirements = [item for item in persisted if hasattr(item, "skill")]
     assert {(item.skill, item.importance) for item in requirements} == {
         ("Python", "required"),
         ("PostgreSQL", "required"),
         ("FastAPI", "nice_to_have"),
     }
     assert background_job.status == "done"
-    assert background_job.result == {"required_skills": 2, "nice_to_have_skills": 1}
+    assert {item.verb for item in persisted if hasattr(item, "verb")} == {"build", "optimize"}
+    assert background_job.result == {
+        "required_skills": 2,
+        "nice_to_have_skills": 1,
+        "action_verbs": 2,
+    }
     final_session.commit.assert_awaited_once()
 
 
@@ -317,3 +325,41 @@ def test_llm_input_is_capped_with_note() -> None:
 
     assert len(capped) == worker.MAX_LLM_CHARACTERS
     assert capped.endswith("[JD truncated to 15,000 characters.]")
+
+
+async def test_missing_action_verbs_is_retried_as_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = parsed_output().replace(
+        ',\n        "action_verbs": ["Build", "build", "Optimize"]', ""
+    )
+    completion = AsyncMock(side_effect=[output, output])
+    monkeypatch.setattr(llm_client, "get_completion", completion)
+
+    assert await worker._validated_completion(uuid4(), "Build APIs") is None
+    assert completion.await_count == 2
+
+
+async def test_old_jd_returns_empty_action_verbs(monkeypatch: pytest.MonkeyPatch) -> None:
+    user = User(id=uuid4(), email="a@example.com")
+    description = JobDescription(
+        id=uuid4(),
+        user_id=user.id,
+        raw_text="Old JD",
+        status="done",
+        parsed_json={
+            "required_skills": [],
+            "nice_to_have_skills": [],
+            "responsibilities": [],
+            "seniority": "unspecified",
+            "ats_keywords": [],
+        },
+    )
+    monkeypatch.setattr(jd, "get_owned_jd", AsyncMock(return_value=description))
+    monkeypatch.setattr(jd, "get_requirements", AsyncMock(return_value=[]))
+    monkeypatch.setattr(jd, "get_action_verbs", AsyncMock(return_value=[]))
+
+    response = await routes.read_jd(description.id, AsyncMock(), user)
+
+    assert response.action_verbs == []
+    assert response.parsed_json is not None and response.parsed_json.action_verbs == []

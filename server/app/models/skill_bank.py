@@ -4,7 +4,6 @@ from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import CheckConstraint, Date, ForeignKey, Integer, Text, text as sql_text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -22,6 +21,10 @@ class SkillBankItem(TimestampMixin, Base):
             "type in ('experience','project','skill','education','certification')",
             name="skill_bank_items_type_check",
         ),
+        CheckConstraint(
+            "source in ('manual','resume_import','github')",
+            name="skill_bank_items_source_check",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -35,7 +38,7 @@ class SkillBankItem(TimestampMixin, Base):
     end_date: Mapped[date | None] = mapped_column(Date)
     raw_text: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sql_text("'{}'::text[]"))
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    source: Mapped[str] = mapped_column(Text, server_default=sql_text("'manual'"))
     user: Mapped["User"] = relationship(back_populates="skill_bank_items")
     bullet_points: Mapped[list["BulletPoint"]] = relationship(
         back_populates="item",
@@ -55,6 +58,5 @@ class BulletPoint(TimestampMixin, Base):
     text: Mapped[str] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sql_text("'{}'::text[]"))
     metrics: Mapped[str | None] = mapped_column(Text)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
     display_order: Mapped[int] = mapped_column(Integer, server_default=sql_text("0"))
     item: Mapped[SkillBankItem] = relationship(back_populates="bullet_points")
