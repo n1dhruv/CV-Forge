@@ -11,6 +11,7 @@ import { useApi } from '@/hooks/useApi'
 import { useBackgroundJobStatus } from '@/hooks/useBackgroundJobStatus'
 import { Reveal } from '@/components/motion/Reveal'
 import { Stagger, StaggerItem } from '@/components/motion/Stagger'
+import { motion } from 'framer-motion'
 import type { ResumeImportCommit, ResumeImportItem, ResumeImportQueued } from '@/lib/types'
 
 type ReviewItem = ResumeImportItem & { key: string; included: boolean }

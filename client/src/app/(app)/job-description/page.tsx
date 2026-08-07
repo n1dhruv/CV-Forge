@@ -111,12 +111,9 @@ export default function JDInput() {
     displayJds = [
       {
         id: queued.job_description_id,
-        user_id: 'temp',
         excerpt: mode === 'paste' ? 'Pasted Job Description' : file?.name || 'Uploaded PDF',
         status: job.data?.status || 'queued',
-        created_at: new Date().toISOString(),
-        action_verbs: [],
-        parsed_json: null
+        created_at: new Date().toISOString()
       },
       ...displayJds
     ]
@@ -314,7 +311,7 @@ export default function JDInput() {
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: 'auto', opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.3, ease: EASE.out }}
+                          transition={{ duration: 0.3, ease: EASE.outExpo }}
                           className="border-t"
                         >
                           {queued && item.id === queued.job_description_id && (job.isPending || job.data?.status === 'queued' || job.data?.status === 'running') ? (
