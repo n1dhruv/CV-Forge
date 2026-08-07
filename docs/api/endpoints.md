@@ -139,7 +139,7 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 **Auth required:** yes  
 **Description:** Embeds each owned JD requirement, searches only the user's Pinecone namespace, then ranks owned PostgreSQL bullets by semantic score, token overlap, and mild recency.  
 **Request:** JD UUID.  
-**Response:** Grouped items/bullets with matched requirements and `pending_embeddings`.  
+**Response:** Grouped items/bullets, fixed confidence labels, `pending_embeddings`, and one result per requirement. A requirement with no qualifying evidence has `no_match=true` and `matched_bullets=[]`.
 **Errors:** `404` foreign/missing JD; `400` missing/unsupported embedding configuration; `502` provider failure.
 
 ### GET /api/background_jobs/{job_id}

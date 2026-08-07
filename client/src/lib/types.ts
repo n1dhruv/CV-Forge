@@ -70,8 +70,9 @@ export interface LLMSettingsSaved {
 export interface LLMTestResult { success: boolean; error: string | null }
 export type SupportedModels = Record<string, string[]>
 
-export interface MatchedRequirement { id: string; text: string; score: number }
-export interface MatchedBullet { id: string; text: string; score: number; requirements: MatchedRequirement[] }
+export type MatchConfidence = 'strong' | 'moderate'
+export interface MatchedRequirement { id: string; text: string; score: number; confidence: MatchConfidence }
+export interface MatchedBullet { id: string; text: string; score: number; confidence: MatchConfidence; requirements: MatchedRequirement[] }
 export interface MatchedItem {
   id: string
   type: string
@@ -81,7 +82,19 @@ export interface MatchedItem {
   end_date: string | null
   bullets: MatchedBullet[]
 }
-export interface MatchResult { jd_id: string; pending_embeddings: boolean; items: MatchedItem[] }
+export interface RequirementMatch {
+  id: string
+  text: string
+  importance: string
+  no_match: boolean
+  matched_bullets: MatchedBullet[]
+}
+export interface MatchResult {
+  jd_id: string
+  pending_embeddings: boolean
+  requirements: RequirementMatch[]
+  items: MatchedItem[]
+}
 
 export type ResumeImportItemType = 'experience' | 'project' | 'education' | 'certification'
 export interface ResumeImportItem {
