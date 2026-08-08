@@ -117,6 +117,8 @@ async def read_jd(jd_id: UUID, session: Session, current_user: CurrentUser) -> J
     parsed_json = description.parsed_json
     if parsed_json is not None and "action_verbs" not in parsed_json:
         parsed_json = {**parsed_json, "action_verbs": []}
+    if parsed_json is not None and "technology_requirements" not in parsed_json:
+        parsed_json = {**parsed_json, "technology_requirements": []}
     return JDDetail(
         id=description.id,
         status=description.status,
@@ -127,6 +129,8 @@ async def read_jd(jd_id: UUID, session: Session, current_user: CurrentUser) -> J
                 skill=requirement.skill,
                 importance=requirement.importance,
                 category=requirement.category,
+                named_technologies=requirement.named_technologies or [],
+                technology_match_mode=requirement.technology_match_mode,
             )
             for requirement in requirements
         ],

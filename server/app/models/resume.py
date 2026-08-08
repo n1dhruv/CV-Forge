@@ -13,7 +13,7 @@ from sqlalchemy import (
     Text,
     text as sql_text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -43,6 +43,10 @@ class JDRequirement(Base):
         CheckConstraint(
             "importance in ('required','nice_to_have')", name="jd_requirements_importance_check"
         ),
+        CheckConstraint(
+            "technology_match_mode in ('any','all') OR technology_match_mode IS NULL",
+            name="jd_requirements_technology_match_mode_check",
+        ),
     )
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=sql_text("uuid_generate_v4()")
@@ -51,6 +55,8 @@ class JDRequirement(Base):
     skill: Mapped[str] = mapped_column(Text)
     importance: Mapped[str] = mapped_column(Text)
     category: Mapped[str | None] = mapped_column(Text)
+    named_technologies: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    technology_match_mode: Mapped[str | None] = mapped_column(Text)
 
 
 class JDActionVerb(Base):

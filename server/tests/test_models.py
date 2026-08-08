@@ -38,3 +38,10 @@ def test_phase_three_metadata_uses_pinecone_not_postgres_vectors() -> None:
     assert "jd_action_verbs" in Base.metadata.tables
     assert "resume_imports" in Base.metadata.tables
     assert "source" in Base.metadata.tables["skill_bank_items"].columns
+
+
+def test_jd_requirements_store_dynamic_technology_evidence_rules() -> None:
+    columns = Base.metadata.tables["jd_requirements"].columns
+
+    assert "named_technologies" in columns
+    assert "technology_match_mode" in columns

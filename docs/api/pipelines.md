@@ -9,9 +9,9 @@ Before using resume import, create a **private** bucket named `resume-imports` a
 1. The user pastes a JD or uploads a PDF.
 2. The API immediately stores a `job_descriptions` row and a `background_jobs` row in PostgreSQL, queues `jd_parse`, and returns both IDs.
 3. The worker reads the text, using the private Supabase Storage object when a PDF was uploaded.
-4. The worker calls the submitting user's encrypted BYOK completion configuration and validates the response. One correction attempt is allowed.
-5. In one PostgreSQL transaction it stores parsed JSON, required/nice-to-have requirement rows, and action-verb rows, then marks the job done.
-6. The UI polls the generic job endpoint and reads the JD detail. JDs created before action verbs were added return an empty list instead of failing.
+4. The worker calls the submitting user's encrypted BYOK completion configuration and validates the response. One correction attempt is allowed. Named technologies are extracted per requirement with `any`/`all` semantics, and every extracted term must occur in the requirement or source JD.
+5. In one PostgreSQL transaction it stores parsed JSON, required/nice-to-have requirement rows, their validated technology terms, and action-verb rows, then marks the job done.
+6. The UI polls the generic job endpoint and reads the JD detail. Legacy JDs missing newer parsed fields return empty lists instead of failing.
 
 ## Embedding and matching
 
@@ -20,7 +20,7 @@ Before using resume import, create a **private** bucket named `resume-imports` a
 3. The worker loads the real bullet from PostgreSQL, calls the user's embedding provider, and writes only the numeric vector plus lookup metadata to Pinecone. PostgreSQL remains the source of truth for all text and dates.
 4. Pinecone stores every user's vectors in a namespace named with that user's UUID. Vector IDs equal PostgreSQL bullet UUIDs.
 5. When the user starts matching, the API verifies ownership of the JD, embeds each structured requirement, and searches only that same namespace.
-6. The API looks every returned UUID up in the user's PostgreSQL Skill Bank and combines semantic similarity, token/fuzzy overlap, and a mild recency signal. Candidates below `0.65` are excluded; named technologies additionally require direct or close lexical evidence.
+6. The API looks every returned UUID up in the user's PostgreSQL Skill Bank and combines semantic similarity, token/fuzzy overlap, and a mild recency signal. Candidates below `0.65` are excluded. Dynamically extracted named technologies additionally require direct or close lexical evidence; formatting, acronyms, and numeronyms such as `ClickHouse`/`Click House`, `Amazon Web Services`/`AWS`, and `Kubernetes`/`K8s` are generated without a technology catalog.
 7. Confidence uses fixed score bands (`strong >= 0.85`, `moderate >= 0.65`). Every requirement is returned explicitly, with `no_match=true` and `matched_bullets=[]` when nothing qualifies.
 8. If PostgreSQL contains bullets not seen in Pinecone, the response sets `pending_embeddings=true` so the UI can show processing rather than treating a partial result as complete.
 9. Deleting a bullet/item removes its Pinecone vector(s) before deleting PostgreSQL content, preventing deleted content from resurfacing.

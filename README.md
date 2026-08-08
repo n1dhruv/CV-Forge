@@ -122,14 +122,17 @@ Input: pasted JD text or uploaded PDF. Output: structured JSON —
   "nice_to_have_skills": ["..."],
   "responsibilities": ["..."],
   "seniority": "mid",
-  "ats_keywords": ["..."]
+  "ats_keywords": ["..."],
+  "technology_requirements": [
+    {"requirement": "Docker and Kubernetes", "named_technologies": ["Docker", "Kubernetes"], "match_mode": "all"}
+  ]
 }
 ```
 An `arq` worker extracts PDFs, calls LiteLLM with the submitting user's key, validates the strict
 JSON schema, retries malformed output once, and persists only validated results.
  
 ### Pipeline B — Skill Bank Embedding
-Every bullet point and skill entry is embedded on create/update and stored in `pgvector`. This is the retrieval index used by the matcher.
+Every bullet point is embedded on create/update and stored in the user's Pinecone namespace. PostgreSQL remains the source of truth for its text.
  
 ### Pipeline C — Matching & Ranking
 For each JD requirement, compute a hybrid relevance score per skill bank item:

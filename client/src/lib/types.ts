@@ -31,6 +31,12 @@ export interface SkillBankItemDetail extends SkillBankItem { bullet_points: Bull
 export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags'>>
 export type BulletPointInput = Pick<BulletPoint, 'text'> & Partial<Pick<BulletPoint, 'tags' | 'metrics' | 'display_order'>>
 
+export interface JDTechnologyRequirement {
+  requirement: string
+  named_technologies: string[]
+  match_mode: 'any' | 'all'
+}
+
 export interface JDParsed {
   required_skills: string[]
   nice_to_have_skills: string[]
@@ -38,9 +44,17 @@ export interface JDParsed {
   seniority: 'junior' | 'mid' | 'senior' | 'staff' | 'unspecified'
   ats_keywords: string[]
   action_verbs?: string[] | null
+  technology_requirements: JDTechnologyRequirement[]
 }
 
-export interface JDRequirement { id: string; skill: string; importance: 'required' | 'nice_to_have'; category: string | null }
+export interface JDRequirement {
+  id: string
+  skill: string
+  importance: 'required' | 'nice_to_have'
+  category: string | null
+  named_technologies: string[]
+  technology_match_mode: 'any' | 'all' | null
+}
 export interface JobDescription { id: string; status: JobStatus; parsed_json: JDParsed | null; requirements: JDRequirement[]; action_verbs?: string[] | null }
 export interface JobDescriptionListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
 export interface JDParseQueued { job_description_id: string; background_job_id: string }
@@ -71,7 +85,13 @@ export interface LLMTestResult { success: boolean; error: string | null }
 export type SupportedModels = Record<string, string[]>
 
 export type MatchConfidence = 'strong' | 'moderate'
-export interface MatchedRequirement { id: string; text: string; score: number; confidence: MatchConfidence }
+export interface MatchedRequirement {
+  id: string
+  text: string
+  score: number
+  confidence: MatchConfidence
+  technology_evidence: string[]
+}
 export interface MatchedBullet { id: string; text: string; score: number; confidence: MatchConfidence; requirements: MatchedRequirement[] }
 export interface MatchedItem {
   id: string
@@ -86,6 +106,9 @@ export interface RequirementMatch {
   id: string
   text: string
   importance: string
+  named_technologies: string[]
+  technology_match_mode: 'any' | 'all' | null
+  technology_evidence: string[]
   no_match: boolean
   matched_bullets: MatchedBullet[]
 }

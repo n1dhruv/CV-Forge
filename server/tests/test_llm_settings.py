@@ -96,6 +96,39 @@ async def test_litellm_auth_error_is_normalized_without_key(
     assert "sk-super-secret" not in str(caught.value)
 
 
+async def test_completion_uses_bounded_transient_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    settings = UserLLMSettings(
+        user_id=user_id,
+        provider="google",
+        model="gemini-3.6-flash",
+        encrypted_api_key=llm_settings.encrypt("google-key"),
+    )
+    completion = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))]
+        )
+    )
+    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
+    monkeypatch.setattr(llm_client.litellm, "acompletion", completion)
+
+    assert await llm_client.get_completion(user_id, [{"role": "user", "content": "hello"}]) == "{}"
+
+    kwargs = completion.await_args.kwargs
+    assert kwargs["timeout"] == 60
+    assert kwargs["num_retries"] == 2
+    assert kwargs["retry_policy"] == {
+        "AuthenticationErrorRetries": 0,
+        "BadRequestErrorRetries": 0,
+        "ContentPolicyViolationErrorRetries": 0,
+        "InternalServerErrorRetries": 2,
+        "RateLimitErrorRetries": 2,
+        "TimeoutErrorRetries": 2,
+    }
+
+
 async def test_connection_endpoint_returns_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_client, "get_completion", AsyncMock(return_value="OK"))
     user = User(id=uuid4(), email="a@example.com")

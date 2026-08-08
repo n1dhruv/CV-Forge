@@ -26,6 +26,7 @@ from app.services.matcher import (
     is_specific_technology,
     match_jd,
 )
+from app.services.technology_matching import infer_legacy_named_technologies
 
 
 async def inspect(
@@ -83,6 +84,10 @@ async def inspect(
     print(f"jd_id={jd_id} user_id={description.user_id} bullets={len(bullets)}")
     for requirement in requirements:
         print(f"\nREQUIREMENT: {requirement.skill}")
+        technologies = requirement.named_technologies
+        if technologies is None:
+            technologies = infer_legacy_named_technologies(requirement.skill)
+        technology_match_mode = requirement.technology_match_mode or "any"
         embedding = await llm_client.get_embedding(description.user_id, requirement.skill)
         matches = await asyncio.to_thread(
             vector_store.query_similar,
@@ -97,10 +102,15 @@ async def inspect(
                 continue
             raw_similarity = float(match["score"])
             recency = _recency(bullet.item)
-            similarity, keyword, combined = candidate_scores(
-                requirement.skill, bullet.text, raw_similarity, recency
+            similarity, keyword, combined, technology_evidence = candidate_scores(
+                requirement.skill,
+                bullet.text,
+                raw_similarity,
+                recency,
+                technologies,
+                technology_match_mode,
             )
-            named_technology = is_specific_technology(requirement.skill)
+            named_technology = is_specific_technology(requirement.skill, technologies)
             if named_technology and keyword < KEYWORD_MIN_THRESHOLD:
                 decision = "rejected:keyword"
             elif combined < MIN_SIMILARITY_THRESHOLD:
@@ -112,7 +122,8 @@ async def inspect(
             print(
                 f"{rank:>2}. raw={raw_similarity:.4f} similarity={similarity:.4f} "
                 f"keyword={keyword:.4f} recency={recency:.4f} combined={combined:.4f} "
-                f"named_technology={named_technology} {decision}"
+                f"technologies={technologies} mode={technology_match_mode} "
+                f"evidence={technology_evidence} named_technology={named_technology} {decision}"
             )
             print(f"    {bullet.text}")
 
@@ -127,7 +138,9 @@ async def inspect(
         for requirement in selected:
             print(
                 f"\nFINAL: {requirement.text} no_match={requirement.no_match} "
-                f"matched_bullets={len(requirement.matched_bullets)}"
+                f"matched_bullets={len(requirement.matched_bullets)} "
+                f"technologies={requirement.named_technologies} "
+                f"evidence={requirement.technology_evidence}"
             )
 
 

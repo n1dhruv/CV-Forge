@@ -10,6 +10,7 @@ class MatchedRequirement(BaseModel):
     text: str
     score: float
     confidence: Literal["strong", "moderate"]
+    technology_evidence: list[str]
 
 
 class MatchedBullet(BaseModel):
@@ -34,6 +35,9 @@ class RequirementMatch(BaseModel):
     id: UUID
     text: str
     importance: Literal["required", "nice_to_have"]
+    named_technologies: list[str]
+    technology_match_mode: Literal["any", "all"] | None
+    technology_evidence: list[str]
     no_match: bool
     matched_bullets: list[MatchedBullet]
 
