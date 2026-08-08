@@ -12,9 +12,10 @@ from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models.jobs import BackgroundJob
 from app.models.resume import JDActionVerb, JDRequirement, JobDescription
-from app.schemas.jd import JDParsed
+from app.schemas.jd import JDParsed, JDTechnologyRequirement
 from app.services import llm_client
 from app.services.storage import StorageService
+from app.services.technology_matching import contains_literal_term, normalized_text
 
 MAX_LLM_CHARACTERS = 15_000
 MIN_EXTRACTED_CHARACTERS = 50
@@ -54,13 +55,24 @@ def prompt_for(raw_text: str) -> str:
   "responsibilities": ["string"],
   "seniority": "junior | mid | senior | staff | unspecified",
   "ats_keywords": ["string"],
-  "action_verbs": ["string"]
+  "action_verbs": ["string"],
+  "technology_requirements": [
+    {{
+      "requirement": "exact string from required_skills or nice_to_have_skills",
+      "named_technologies": ["technology exactly as written in the job description"],
+      "match_mode": "any | all"
+    }}
+  ]
 }}
 Return only the valid JSON object: no preamble, markdown fences, or commentary.
 Use an empty array, never null or an omitted field, when a list category has no values.
 Extract strong action verbs actually used in responsibilities or requirements. Deduplicate them
 and normalize inflections to a base form where reasonable (for example, "manage" instead of
 "managing", "managed", and "manages"). Do not invent verbs absent from the job description.
+For technology_requirements, include only requirements that name concrete technologies,
+products, programming languages, platforms, protocols, or tools. Copy each technology exactly
+as written in the job description. Use "all" only when the requirement explicitly requires every
+listed technology; use "any" for alternatives such as "or". Do not invent aliases or technologies.
 
 Job description:
 {capped_jd_text(raw_text)}"""
@@ -115,8 +127,10 @@ async def _validated_completion(user_id: UUID, raw_text: str) -> JDParsed | None
     for attempt in range(2):
         output = await llm_client.get_completion(user_id, messages)
         try:
-            return JDParsed.model_validate_json(output)
-        except ValidationError:
+            parsed = JDParsed.model_validate_json(output)
+            validated_technology_specs(parsed, raw_text)
+            return parsed
+        except (ValidationError, ValueError):
             if attempt == 0:
                 messages.extend(
                     [
@@ -135,6 +149,33 @@ async def _validated_completion(user_id: UUID, raw_text: str) -> JDParsed | None
 
 def deduplicate(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value.strip().casefold() for value in values if value.strip()))
+
+
+def validated_technology_specs(
+    parsed: JDParsed, raw_text: str
+) -> dict[str, JDTechnologyRequirement]:
+    requirements = {
+        normalized_text(requirement)
+        for requirement in parsed.required_skills + parsed.nice_to_have_skills
+    }
+    validated: dict[str, JDTechnologyRequirement] = {}
+    for spec in parsed.technology_requirements:
+        requirement_key = normalized_text(spec.requirement)
+        if requirement_key not in requirements or requirement_key in validated:
+            raise ValueError("Technology extraction references an unknown requirement")
+        technologies = list(
+            dict.fromkeys(
+                technology.strip() for technology in spec.named_technologies if technology.strip()
+            )
+        )
+        if not technologies or any(
+            not contains_literal_term(raw_text, technology)
+            and not contains_literal_term(spec.requirement, technology)
+            for technology in technologies
+        ):
+            raise ValueError("Technology extraction contains an invented term")
+        validated[requirement_key] = spec.model_copy(update={"named_technologies": technologies})
+    return validated
 
 
 async def parse_jd_task(
@@ -228,17 +269,30 @@ async def parse_jd_task(
                 return
             parsed_data = parsed.model_dump()
             parsed_data["action_verbs"] = deduplicate(parsed.action_verbs)
+            technology_specs = validated_technology_specs(parsed, raw_text)
+            parsed_data["technology_requirements"] = [
+                spec.model_dump() for spec in technology_specs.values()
+            ]
             current_jd.parsed_json = parsed_data
             current_jd.status = "done"
-            session.add_all(
-                [
-                    JDRequirement(jd_id=parsed_jd_id, skill=skill, importance=importance)
-                    for importance, skills in (
-                        ("required", parsed.required_skills),
-                        ("nice_to_have", parsed.nice_to_have_skills),
+            requirement_rows = []
+            for importance, skills in (
+                ("required", parsed.required_skills),
+                ("nice_to_have", parsed.nice_to_have_skills),
+            ):
+                for skill in skills:
+                    spec = technology_specs.get(normalized_text(skill))
+                    requirement_rows.append(
+                        JDRequirement(
+                            jd_id=parsed_jd_id,
+                            skill=skill,
+                            importance=importance,
+                            named_technologies=(spec.named_technologies if spec else []),
+                            technology_match_mode=(spec.match_mode if spec else None),
+                        )
                     )
-                    for skill in skills
-                ]
+            session.add_all(
+                requirement_rows
                 + [
                     JDActionVerb(jd_id=parsed_jd_id, verb=verb)
                     for verb in parsed_data["action_verbs"]

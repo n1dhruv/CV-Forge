@@ -130,7 +130,7 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### GET /api/jd/{jd_id}
 **Auth required:** yes  
-**Description:** Returns parse status, structured JSON, requirements, and `action_verbs`. Older parses without that field return an empty list.  
+**Description:** Returns parse status, structured JSON, requirements, validated named technologies, their `any`/`all` matching mode, and `action_verbs`. Older parses return empty lists for missing fields.
 **Request:** JD UUID.  
 **Response:** JD detail; `action_verbs` exists both in parsed JSON and as the top-level structured list.  
 **Errors:** `404` if not owned/found.
@@ -139,7 +139,7 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 **Auth required:** yes  
 **Description:** Embeds each owned JD requirement, searches only the user's Pinecone namespace, then ranks owned PostgreSQL bullets by semantic score, token overlap, and mild recency.  
 **Request:** JD UUID.  
-**Response:** Grouped items/bullets with matched requirements and `pending_embeddings`.  
+**Response:** Grouped items/bullets, fixed confidence labels, named-technology evidence, `pending_embeddings`, and one result per requirement. A requirement with no qualifying evidence has `no_match=true` and `matched_bullets=[]`.
 **Errors:** `404` foreign/missing JD; `400` missing/unsupported embedding configuration; `502` provider failure.
 
 ### GET /api/background_jobs/{job_id}

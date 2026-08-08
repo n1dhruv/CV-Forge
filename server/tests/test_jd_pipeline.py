@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -12,7 +13,7 @@ from app.api.jd import routes
 from app.api.jobs import read_background_job
 from app.core.config import get_settings
 from app.models.jobs import BackgroundJob
-from app.models.resume import JobDescription
+from app.models.resume import JDRequirement, JobDescription
 from app.models.user import User
 from app.services import jd, jobs, llm_client
 from app.workers import jd as worker
@@ -39,7 +40,12 @@ def parsed_output() -> str:
         "responsibilities": ["Build APIs"],
         "seniority": "senior",
         "ats_keywords": ["async", "REST"],
-        "action_verbs": ["Build", "build", "Optimize"]
+        "action_verbs": ["Build", "build", "Optimize"],
+        "technology_requirements": [
+            {"requirement": "Python", "named_technologies": ["Python"], "match_mode": "any"},
+            {"requirement": "PostgreSQL", "named_technologies": ["PostgreSQL"], "match_mode": "any"},
+            {"requirement": "FastAPI", "named_technologies": ["FastAPI"], "match_mode": "any"}
+        ]
     }"""
 
 
@@ -69,6 +75,23 @@ async def test_successful_pasted_text_parse_persists_validated_result(
         "seniority": "senior",
         "ats_keywords": ["async", "REST"],
         "action_verbs": ["build", "optimize"],
+        "technology_requirements": [
+            {
+                "requirement": "Python",
+                "named_technologies": ["Python"],
+                "match_mode": "any",
+            },
+            {
+                "requirement": "PostgreSQL",
+                "named_technologies": ["PostgreSQL"],
+                "match_mode": "any",
+            },
+            {
+                "requirement": "FastAPI",
+                "named_technologies": ["FastAPI"],
+                "match_mode": "any",
+            },
+        ],
     }
     persisted = final_session.add_all.call_args.args[0]
     requirements = [item for item in persisted if hasattr(item, "skill")]
@@ -76,6 +99,13 @@ async def test_successful_pasted_text_parse_persists_validated_result(
         ("Python", "required"),
         ("PostgreSQL", "required"),
         ("FastAPI", "nice_to_have"),
+    }
+    assert {
+        item.skill: (item.named_technologies, item.technology_match_mode) for item in requirements
+    } == {
+        "Python": (["Python"], "any"),
+        "PostgreSQL": (["PostgreSQL"], "any"),
+        "FastAPI": (["FastAPI"], "any"),
     }
     assert background_job.status == "done"
     assert {item.verb for item in persisted if hasattr(item, "verb")} == {"build", "optimize"}
@@ -105,6 +135,17 @@ async def test_malformed_output_retries_once_then_fails_without_writes(
     assert completion.await_count == 2
     assert description.parsed_json is None
     assert set_status.await_args.kwargs["error"] == worker.INVALID_OUTPUT_ERROR
+
+
+async def test_invented_technology_is_retried_as_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = parsed_output().replace('["Python"]', '["MadeUpDB"]', 1)
+    completion = AsyncMock(side_effect=[output, output])
+    monkeypatch.setattr(llm_client, "get_completion", completion)
+
+    assert await worker._validated_completion(uuid4(), "Senior Python engineer") is None
+    assert completion.await_count == 2
 
 
 async def test_no_llm_settings_fails_before_loading_jd_or_calling_provider(
@@ -363,3 +404,33 @@ async def test_old_jd_returns_empty_action_verbs(monkeypatch: pytest.MonkeyPatch
 
     assert response.action_verbs == []
     assert response.parsed_json is not None and response.parsed_json.action_verbs == []
+    assert response.parsed_json.technology_requirements == []
+
+
+async def test_jd_detail_returns_persisted_dynamic_technology_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = User(id=uuid4(), email="a@example.com")
+    description = JobDescription(
+        id=uuid4(),
+        user_id=user.id,
+        raw_text="NATS messaging",
+        status="done",
+        parsed_json=json.loads(parsed_output()),
+    )
+    requirement = JDRequirement(
+        id=uuid4(),
+        jd_id=description.id,
+        skill="Operate NATS messaging",
+        importance="required",
+        named_technologies=["NATS"],
+        technology_match_mode="any",
+    )
+    monkeypatch.setattr(jd, "get_owned_jd", AsyncMock(return_value=description))
+    monkeypatch.setattr(jd, "get_requirements", AsyncMock(return_value=[requirement]))
+    monkeypatch.setattr(jd, "get_action_verbs", AsyncMock(return_value=[]))
+
+    response = await routes.read_jd(description.id, AsyncMock(), user)
+
+    assert response.requirements[0].named_technologies == ["NATS"]
+    assert response.requirements[0].technology_match_mode == "any"

@@ -9,6 +9,17 @@ from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models.settings import UserLLMSettings
 
+COMPLETION_TIMEOUT_SECONDS = 60
+COMPLETION_RETRIES = 2
+COMPLETION_RETRY_POLICY = {
+    "AuthenticationErrorRetries": 0,
+    "BadRequestErrorRetries": 0,
+    "ContentPolicyViolationErrorRetries": 0,
+    "InternalServerErrorRetries": COMPLETION_RETRIES,
+    "RateLimitErrorRetries": COMPLETION_RETRIES,
+    "TimeoutErrorRetries": COMPLETION_RETRIES,
+}
+
 
 class LLMError(Exception):
     """Base exception for safe, provider-independent LLM failures."""
@@ -58,6 +69,9 @@ async def get_completion(user_id: UUID, messages: list[dict[str, str]], **kwargs
     if settings is None:
         raise LLMNotConfiguredError("No LLM provider configured")
 
+    kwargs.setdefault("timeout", COMPLETION_TIMEOUT_SECONDS)
+    kwargs.setdefault("num_retries", COMPLETION_RETRIES)
+    kwargs.setdefault("retry_policy", COMPLETION_RETRY_POLICY)
     try:
         response = await litellm.acompletion(
             model=provider_model(settings.provider, settings.model),

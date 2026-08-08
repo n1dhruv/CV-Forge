@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +11,17 @@ class JDTextSubmission(BaseModel):
     raw_text: str = Field(min_length=1, max_length=100_000)
 
 
+NonEmptyText = Annotated[str, Field(min_length=1)]
+
+
+class JDTechnologyRequirement(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    requirement: NonEmptyText
+    named_technologies: list[NonEmptyText] = Field(min_length=1)
+    match_mode: Literal["any", "all"]
+
+
 class JDParsed(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -20,6 +31,7 @@ class JDParsed(BaseModel):
     seniority: Literal["junior", "mid", "senior", "staff", "unspecified"]
     ats_keywords: list[str]
     action_verbs: list[str]
+    technology_requirements: list[JDTechnologyRequirement]
 
 
 class JDParseQueued(BaseModel):
@@ -32,6 +44,8 @@ class JDRequirementRead(BaseModel):
     skill: str
     importance: Literal["required", "nice_to_have"]
     category: str | None
+    named_technologies: list[str]
+    technology_match_mode: Literal["any", "all"] | None
 
 
 class JDDetail(BaseModel):

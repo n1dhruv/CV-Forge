@@ -54,6 +54,7 @@ export default function MatchReview() {
   }
 
   const count = match.data.items.reduce((total, item) => total + item.bullets.length, 0)
+  const unmatched = match.data.requirements.filter(requirement => requirement.no_match)
   
   return (
     <div className="container-normal py-10 pb-24 md:py-12">
@@ -92,7 +93,7 @@ export default function MatchReview() {
                 </p>
               </div>
               <p className="hidden max-w-xs text-right text-xs leading-relaxed text-muted sm:block">
-                Labels summarize relative fit; raw vector scores stay out of the way.
+                Confidence uses fixed relevance thresholds, not relative ranking.
               </p>
             </div>
             
@@ -113,11 +114,23 @@ export default function MatchReview() {
                 <Link2 size={20} className="text-muted" />
               </div>
               <p className="font-display text-2xl font-medium">No matching proof points yet</p>
-              <p className="mt-3 text-sm leading-relaxed text-muted">Add bullets to your Skill Bank, or wait for new embeddings to finish processing.</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted">No saved proof point cleared the relevance threshold for this role.</p>
               <Link className="button-secondary mt-6" href="/skill-bank">Open Skill Bank</Link>
             </div>
           </div>
         )}
+
+        {unmatched.length ? (
+          <section className="mt-8 rounded-xl border bg-raised/40 px-6 py-5 sm:px-8" aria-labelledby="unmatched-requirements">
+            <h2 id="unmatched-requirements" className="font-display text-xl font-medium">No strong match found</h2>
+            <p className="mt-1 text-sm text-muted">These requirements had no qualifying Skill Bank evidence.</p>
+            <ul className="mt-4 flex flex-wrap gap-2">
+              {unmatched.map(requirement => (
+                <li className="tag" key={requirement.id}>{requirement.text}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </Reveal>
     </div>
   )
@@ -150,7 +163,7 @@ function MatchedSource({ item, index }: { item: MatchedItem; index: number }) {
 }
 
 function MatchedEvidence({ bullet, index }: { bullet: MatchedBullet; index: number }) {
-  const strong = bullet.score >= .72
+  const strong = bullet.confidence === 'strong'
   
   return (
     <li className="grid gap-4 py-6 sm:grid-cols-[2.5rem_minmax(0,1fr)] first:pt-4 lg:first:pt-0 last:pb-0">
@@ -163,7 +176,7 @@ function MatchedEvidence({ bullet, index }: { bullet: MatchedBullet; index: numb
             strong ? 'bg-success/10 text-success' : 'bg-accent/10 text-accent'
           }`}>
             {strong && <CheckCircle2 size={12} />}
-            {strong ? 'Strong match' : 'Good match'}
+            {strong ? 'Strong match' : 'Moderate match'}
           </span>
         </div>
         
