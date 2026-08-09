@@ -81,6 +81,6 @@ async def update_bullet(
 
 
 async def delete_bullet(session: AsyncSession, user_id: UUID, bullet: BulletPoint) -> None:
-    await asyncio.to_thread(vector_store.delete_vector, user_id, bullet.id)
+    await asyncio.to_thread(vector_store.delete_vectors, user_id, bullet.id)
     await session.delete(bullet)
     await session.commit()

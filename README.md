@@ -282,6 +282,9 @@ python -m uvicorn app.main:app --reload
 | `REDIS_URL` | Redis connection string (broker + cache) |
 | `ENCRYPTION_KEY` | Fernet key used to encrypt each user's stored LLM API key |
 | `EMBEDDING_MODEL` | Model identifier used for embeddings |
+| `PINECONE_INDEX_NAME` / `PINECONE_HOST` | Dense Pinecone index name and data-plane host |
+| `PINECONE_SPARSE_INDEX_NAME` | Separate sparse Pinecone index name |
+| `PINECONE_RERANK_MODEL` | Pinecone hosted model used to rerank merged candidates |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | OAuth credentials for GitHub integration |
 | `JWT_SECRET_KEY` | Secret used to sign session tokens |
 | `S3_BUCKET_NAME` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object storage credentials for generated PDFs |

@@ -137,10 +137,10 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/match/{jd_id}
 **Auth required:** yes  
-**Description:** Embeds each owned JD requirement, searches only the user's Pinecone namespace, then ranks owned PostgreSQL bullets by semantic score, token overlap, and mild recency.  
+**Description:** Embeds each owned JD requirement, searches separate dense and sparse Pinecone indexes in the user's namespace, deduplicates the candidates, then ranks their owned PostgreSQL text with Pinecone's hosted reranker.  
 **Request:** JD UUID.  
-**Response:** Grouped items/bullets, fixed confidence labels, named-technology evidence, `pending_embeddings`, and one result per requirement. A requirement with no qualifying evidence has `no_match=true` and `matched_bullets=[]`.
-**Errors:** `404` foreign/missing JD; `400` missing/unsupported embedding configuration; `502` provider failure.
+**Response:** Grouped items/bullets, rerank-score confidence labels, `pending_embeddings`, and one result per requirement. A requirement with no candidate at or above the calibrated `0.0001` threshold has `no_match=true` and `matched_bullets=[]`.
+**Errors:** `404` foreign/missing JD; `400` missing/unsupported dense embedding configuration; `502` dense provider, Pinecone search, readiness-check, or reranker failure.
 
 ### GET /api/background_jobs/{job_id}
 **Auth required:** yes  

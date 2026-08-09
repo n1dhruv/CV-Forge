@@ -1,8 +1,5 @@
 import asyncio
-import re
 from collections import defaultdict
-from datetime import date
-from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,86 +16,34 @@ from app.schemas.match import (
     RequirementMatch,
 )
 from app.services import llm_client, vector_store
-from app.services.technology_matching import (
-    infer_legacy_named_technologies,
-    technology_keyword_score,
-)
 
-WORD = re.compile(r"[a-z0-9+#]+")
-
-MIN_SIMILARITY_THRESHOLD = 0.65
-STRONG_MATCH_THRESHOLD = 0.85
-KEYWORD_MIN_THRESHOLD = 0.85
-
-
-def _overlap(left: str, right: str) -> float:
-    left_tokens = set(WORD.findall(left.casefold()))
-    right_tokens = set(WORD.findall(right.casefold()))
-    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens) if left_tokens else 0.0
-
-
-def candidate_scores(
-    requirement_text: str,
-    candidate_text: str,
-    raw_similarity: float,
-    recency: float,
-    named_technologies: list[str] | tuple[str, ...] | None = None,
-    technology_match_mode: Literal["any", "all"] = "any",
-) -> tuple[float, float, float, list[str]]:
-    similarity = max(0.0, min(1.0, (raw_similarity + 1.0) / 2.0))
-    technologies = (
-        infer_legacy_named_technologies(requirement_text)
-        if named_technologies is None
-        else list(named_technologies)
-    )
-    if technologies:
-        keyword, evidence = technology_keyword_score(
-            technologies,
-            candidate_text,
-            technology_match_mode,
-            KEYWORD_MIN_THRESHOLD,
-        )
-    else:
-        keyword, evidence = _overlap(requirement_text, candidate_text), []
-    combined = 0.75 * similarity + 0.20 * keyword + 0.05 * recency
-    return similarity, keyword, combined, evidence
-
-
-def is_specific_technology(
-    requirement_text: str, named_technologies: list[str] | None = None
-) -> bool:
-    technologies = (
-        infer_legacy_named_technologies(requirement_text)
-        if named_technologies is None
-        else named_technologies
-    )
-    return bool(technologies)
-
-
-def _technology_config(
-    requirement: JDRequirement,
-) -> tuple[list[str], Literal["any", "all"]]:
-    technologies = requirement.named_technologies
-    if technologies is None:
-        technologies = infer_legacy_named_technologies(requirement.skill)
-    match_mode = requirement.technology_match_mode
-    return list(technologies), match_mode if match_mode in ("any", "all") else "any"
+SEARCH_TOP_K = 25
+MIN_RERANK_SCORE = 0.0001
+STRONG_RERANK_SCORE = 0.01
 
 
 def _confidence(score: float) -> str | None:
-    if score >= STRONG_MATCH_THRESHOLD:
+    if score >= STRONG_RERANK_SCORE:
         return "strong"
-    if score >= MIN_SIMILARITY_THRESHOLD:
+    if score >= MIN_RERANK_SCORE:
         return "moderate"
     return None
 
 
-def _recency(item: SkillBankItem) -> float:
-    item_date = item.end_date or item.start_date
-    if item_date is None:
-        return 0.0
-    years = max(0.0, (date.today() - item_date).days / 365.25)
-    return max(0.0, 1.0 - years / 10.0)
+def _requirement_result(
+    requirement: JDRequirement, matched_bullets: list[MatchedBullet]
+) -> RequirementMatch:
+    technologies = list(requirement.named_technologies or [])
+    return RequirementMatch(
+        id=requirement.id,
+        text=requirement.skill,
+        importance=requirement.importance,
+        named_technologies=technologies,
+        technology_match_mode=requirement.technology_match_mode if technologies else None,
+        technology_evidence=[],
+        no_match=not matched_bullets,
+        matched_bullets=matched_bullets,
+    )
 
 
 async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) -> MatchResult | None:
@@ -127,75 +72,71 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
     if not requirements:
         return MatchResult(jd_id=jd_id, pending_embeddings=False, requirements=[], items=[])
     if not bullets:
-        requirement_matches = []
-        for requirement in requirements:
-            technologies, technology_match_mode = _technology_config(requirement)
-            requirement_matches.append(
-                RequirementMatch(
-                    id=requirement.id,
-                    text=requirement.skill,
-                    importance=requirement.importance,
-                    named_technologies=technologies,
-                    technology_match_mode=(technology_match_mode if technologies else None),
-                    technology_evidence=[],
-                    no_match=True,
-                    matched_bullets=[],
-                )
-            )
         return MatchResult(
             jd_id=jd_id,
             pending_embeddings=False,
-            requirements=requirement_matches,
+            requirements=[_requirement_result(requirement, []) for requirement in requirements],
             items=[],
         )
 
     bullets_by_id = {bullet.id: bullet for bullet in bullets}
+    dense_ids, sparse_ids = await asyncio.to_thread(
+        vector_store.vector_presence, user_id, list(bullets_by_id)
+    )
+    ready_ids = dense_ids & sparse_ids
+    pending_embeddings = len(ready_ids) < len(bullets_by_id)
     matches_by_bullet: dict[UUID, list[MatchedRequirement]] = defaultdict(list)
     bullet_ids_by_requirement: dict[UUID, list[UUID]] = defaultdict(list)
-    evidence_by_requirement: dict[UUID, set[str]] = defaultdict(set)
-    seen_vector_ids: set[UUID] = set()
+
     for requirement in requirements:
-        technologies, technology_match_mode = _technology_config(requirement)
         embedding = await llm_client.get_embedding(user_id, requirement.skill)
-        matches = await asyncio.to_thread(
-            vector_store.query_similar,
-            user_id,
-            embedding,
-            len(bullets),
+        dense_matches, sparse_matches = await asyncio.gather(
+            asyncio.to_thread(vector_store.query_dense, user_id, embedding, SEARCH_TOP_K),
+            asyncio.to_thread(vector_store.query_sparse, user_id, requirement.skill, SEARCH_TOP_K),
         )
-        for match in matches:
+        candidate_ids: list[UUID] = []
+        seen: set[UUID] = set()
+        for match in dense_matches + sparse_matches:
             try:
                 bullet_id = UUID(str(match["bullet_id"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            bullet = bullets_by_id.get(bullet_id)
-            if bullet is None:
+            if (
+                bullet_id in seen
+                or str(bullet_id) not in ready_ids
+                or bullet_id not in bullets_by_id
+            ):
                 continue
-            seen_vector_ids.add(bullet_id)
-            _, keyword, score, technology_evidence = candidate_scores(
-                requirement.skill,
-                bullet.text,
-                float(match["score"]),
-                _recency(bullet.item),
-                technologies,
-                technology_match_mode,
+            seen.add(bullet_id)
+            candidate_ids.append(bullet_id)
+
+        candidates = [
+            {"bullet_id": str(bullet_id), "text": bullets_by_id[bullet_id].text}
+            for bullet_id in candidate_ids
+        ]
+        ranked = (
+            await asyncio.to_thread(
+                vector_store.rerank, requirement.skill, candidates, len(candidates)
             )
-            if technologies and keyword < KEYWORD_MIN_THRESHOLD:
-                continue
+            if candidates
+            else []
+        )
+        for candidate in ranked:
+            score = float(candidate["score"])
             confidence = _confidence(score)
             if confidence is None:
                 continue
+            bullet_id = UUID(str(candidate["bullet_id"]))
             matches_by_bullet[bullet_id].append(
                 MatchedRequirement(
                     id=requirement.id,
                     text=requirement.skill,
                     score=score,
                     confidence=confidence,
-                    technology_evidence=technology_evidence,
+                    technology_evidence=[],
                 )
             )
             bullet_ids_by_requirement[requirement.id].append(bullet_id)
-            evidence_by_requirement[requirement.id].update(technology_evidence)
 
     grouped: dict[UUID, list[MatchedBullet]] = defaultdict(list)
     matched_bullets_by_id: dict[UUID, MatchedBullet] = {}
@@ -228,9 +169,9 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
             )
         )
     items.sort(key=lambda item: item.bullets[0].score, reverse=True)
+
     requirement_matches = []
     for requirement in requirements:
-        technologies, technology_match_mode = _technology_config(requirement)
         matched_bullets = [
             matched_bullets_by_id[bullet_id]
             for bullet_id in bullet_ids_by_requirement[requirement.id]
@@ -241,25 +182,11 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
             ),
             reverse=True,
         )
-        requirement_matches.append(
-            RequirementMatch(
-                id=requirement.id,
-                text=requirement.skill,
-                importance=requirement.importance,
-                named_technologies=technologies,
-                technology_match_mode=(technology_match_mode if technologies else None),
-                technology_evidence=[
-                    technology
-                    for technology in technologies
-                    if technology in evidence_by_requirement[requirement.id]
-                ],
-                no_match=not matched_bullets,
-                matched_bullets=matched_bullets,
-            )
-        )
+        requirement_matches.append(_requirement_result(requirement, matched_bullets))
+
     return MatchResult(
         jd_id=jd_id,
-        pending_embeddings=len(seen_vector_ids) < len(bullets_by_id),
+        pending_embeddings=pending_embeddings,
         requirements=requirement_matches,
         items=items,
     )
