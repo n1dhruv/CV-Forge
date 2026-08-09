@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     pinecone_api_key: SecretStr = Field(alias="PINECONE_API_KEY", min_length=1)
     pinecone_index_name: str = Field(alias="PINECONE_INDEX_NAME", min_length=1)
     pinecone_host: str = Field(alias="PINECONE_HOST", min_length=1)
+    pinecone_sparse_index_name: str = Field(alias="PINECONE_SPARSE_INDEX_NAME", min_length=1)
+    pinecone_rerank_model: str = Field(alias="PINECONE_RERANK_MODEL", min_length=1)
     github_client_id: str = Field(alias="GITHUB_CLIENT_ID")
     github_client_secret: SecretStr = Field(alias="GITHUB_CLIENT_SECRET")
     tectonic_binary_path: str = Field(alias="TECTONIC_BINARY_PATH")

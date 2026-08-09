@@ -15,6 +15,8 @@ DEFAULTS = {
     "PINECONE_API_KEY": "test",
     "PINECONE_INDEX_NAME": "resumeforge-bullets",
     "PINECONE_HOST": "https://test-index.example.test",
+    "PINECONE_SPARSE_INDEX_NAME": "resumeforge-bullets-sparse",
+    "PINECONE_RERANK_MODEL": "pinecone-rerank-v0",
     "GITHUB_CLIENT_ID": "test",
     "GITHUB_CLIENT_SECRET": "test",
     "TECTONIC_BINARY_PATH": "tectonic",

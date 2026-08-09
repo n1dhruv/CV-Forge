@@ -11,7 +11,14 @@ from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.services import llm_client, vector_store
 
 
-async def _fail(job_id: UUID, user_id: UUID, error: str) -> None:
+async def _finish(
+    job_id: UUID,
+    user_id: UUID,
+    bullet_id: UUID,
+    dense_stored: bool,
+    sparse_stored: bool,
+    error: str | None,
+) -> None:
     async with async_session_factory() as session:
         job = await session.scalar(
             select(BackgroundJob).where(
@@ -20,8 +27,13 @@ async def _fail(job_id: UUID, user_id: UUID, error: str) -> None:
         )
         if job is None:
             return
-        job.status = "failed"
+        job.status = "done" if dense_stored and sparse_stored else "failed"
         job.error = error
+        job.result = {
+            "bullet_id": str(bullet_id),
+            "dense_stored": dense_stored,
+            "sparse_stored": sparse_stored,
+        }
         await session.commit()
 
 
@@ -52,40 +64,55 @@ async def embed_bullet_task(
         text = bullet.text
         metadata = {"item_id": str(bullet.item_id), "item_type": bullet.item.type}
 
-    try:
-        embedding = await llm_client.get_embedding(parsed_user_id, text)
-        await asyncio.to_thread(
-            vector_store.upsert_vector,
-            parsed_user_id,
-            parsed_bullet_id,
-            embedding,
-            metadata,
-        )
-    except llm_client.LLMNotConfiguredError:
-        await _fail(parsed_job_id, parsed_user_id, "No embedding provider configured")
-        return
-    except llm_client.EmbeddingProviderUnsupportedError as exc:
-        await _fail(parsed_job_id, parsed_user_id, str(exc))
-        return
-    except llm_client.LLMError:
-        await _fail(
-            parsed_job_id, parsed_user_id, "The embedding provider could not process this bullet"
-        )
-        return
-    except Exception:
-        await _fail(parsed_job_id, parsed_user_id, "Pinecone could not store this embedding")
-        return
+    dense_embedding, sparse_values = await asyncio.gather(
+        llm_client.get_embedding(parsed_user_id, text),
+        asyncio.to_thread(vector_store.sparse_embedding, text, "passage"),
+        return_exceptions=True,
+    )
+    errors: list[str] = []
+    dense_stored = False
+    sparse_stored = False
 
-    async with async_session_factory() as session:
-        job = await session.scalar(
-            select(BackgroundJob).where(
-                BackgroundJob.id == parsed_job_id,
-                BackgroundJob.user_id == parsed_user_id,
+    if isinstance(dense_embedding, BaseException):
+        if isinstance(dense_embedding, llm_client.LLMNotConfiguredError):
+            errors.append("No embedding provider configured")
+        elif isinstance(dense_embedding, llm_client.EmbeddingProviderUnsupportedError):
+            errors.append(str(dense_embedding))
+        else:
+            errors.append("The embedding provider could not process this bullet")
+    else:
+        try:
+            await asyncio.to_thread(
+                vector_store.upsert_dense_vector,
+                parsed_user_id,
+                parsed_bullet_id,
+                dense_embedding,
+                metadata,
             )
-        )
-        if job is None:
-            return
-        job.status = "done"
-        job.error = None
-        job.result = {"bullet_id": str(parsed_bullet_id)}
-        await session.commit()
+            dense_stored = True
+        except Exception:
+            errors.append("Pinecone could not store the dense embedding")
+
+    if isinstance(sparse_values, BaseException):
+        errors.append("Pinecone could not create the sparse embedding")
+    else:
+        try:
+            await asyncio.to_thread(
+                vector_store.upsert_sparse_vector,
+                parsed_user_id,
+                parsed_bullet_id,
+                sparse_values,
+                metadata,
+            )
+            sparse_stored = True
+        except Exception:
+            errors.append("Pinecone could not store the sparse embedding")
+
+    await _finish(
+        parsed_job_id,
+        parsed_user_id,
+        parsed_bullet_id,
+        dense_stored,
+        sparse_stored,
+        "; ".join(errors) or None,
+    )

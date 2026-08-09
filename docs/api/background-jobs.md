@@ -6,7 +6,7 @@ Triggered by `POST /api/jd/parse`. The worker first verifies LLM settings, marks
 
 ## `embedding`
 
-Triggered after a bullet is created/updated, after an item's existing bullets need metadata refresh, or after a resume import commit. The worker loads the bullet through an owned parent, calls `llm_client.get_embedding`, then upserts the vector under ID `bullet_points.id` into Pinecone namespace `user_id` with `user_id`, `bullet_id`, `item_id`, and `item_type` metadata. It never writes an embedding column in PostgreSQL. Missing or unsupported embedding configuration is an expected failed-job state; provider/Pinecone errors are normalized and do not crash the worker.
+Triggered after a bullet is created/updated, after an item's existing bullets need metadata refresh, or after a resume import commit. The worker loads the bullet through an owned parent and independently writes two vectors under ID `bullet_points.id`: a dense vector from `llm_client.get_embedding` to the dense index, and a learned sparse vector from Pinecone's hosted `pinecone-sparse-english-v0` passage encoder to the sparse index. Both writes use Pinecone namespace `user_id` and carry `user_id`, `bullet_id`, `item_id`, and `item_type` metadata. The job result records `dense_stored` and `sparse_stored`; if only one succeeds, the successful vector remains stored, the job is marked failed with a safe error, and editing the bullet retries both writes. No embedding column is written in PostgreSQL.
 
 ## `resume_import`
 

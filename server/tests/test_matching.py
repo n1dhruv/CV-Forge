@@ -1,9 +1,14 @@
 from datetime import date
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
+import pytest
+from fastapi import HTTPException
+
+from app.api import match as match_api
 from app.models.resume import JDRequirement, JobDescription
 from app.models.skill_bank import BulletPoint, SkillBankItem
+from app.models.user import User
 from app.services import llm_client, matcher, vector_store
 
 
@@ -35,27 +40,34 @@ class FakeSession:
         return Result(next(self.results))
 
 
-def fixture_rows(user_id):
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="Python APIs", status="done")
+def rows(user_id, requirement_text, bullet_texts):
+    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text=requirement_text, status="done")
     requirement = JDRequirement(
-        id=uuid4(), jd_id=jd.id, skill="Build Python APIs", importance="required"
+        id=uuid4(), jd_id=jd.id, skill=requirement_text, importance="required"
     )
-    relevant_item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="experience", title="Backend", end_date=date.today()
-    )
-    unrelated_item = SkillBankItem(id=uuid4(), user_id=user_id, type="project", title="Design")
-    relevant = BulletPoint(
-        id=uuid4(), item_id=relevant_item.id, text="Built Python APIs", item=relevant_item
-    )
-    unrelated = BulletPoint(
-        id=uuid4(), item_id=unrelated_item.id, text="Painted landscape posters", item=unrelated_item
-    )
-    return jd, [requirement], [relevant, unrelated]
+    bullets = []
+    for index, text in enumerate(bullet_texts):
+        item = SkillBankItem(
+            id=uuid4(),
+            user_id=user_id,
+            type="experience",
+            title=f"Item {index}",
+            end_date=date.today(),
+        )
+        bullets.append(BulletPoint(id=uuid4(), item_id=item.id, text=text, item=item))
+    return jd, [requirement], bullets
 
 
-async def test_matching_ranks_semantic_and_keyword_overlap(monkeypatch) -> None:
-    user_id = uuid4()
-    jd, requirements, bullets = fixture_rows(user_id)
+def install_pipeline(
+    monkeypatch,
+    user_id,
+    jd,
+    requirements,
+    bullets,
+    dense_ids,
+    sparse_ids,
+    scores,
+):
     monkeypatch.setattr(
         matcher, "async_session_factory", lambda: FakeSession(jd, requirements, bullets)
     )
@@ -65,41 +77,134 @@ async def test_matching_ranks_semantic_and_keyword_overlap(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         vector_store,
-        "query_similar",
-        lambda *args: [
-            {"bullet_id": str(bullets[0].id), "score": 0.95, "metadata": {}},
-            {"bullet_id": str(bullets[1].id), "score": 0.1, "metadata": {}},
-        ],
+        "vector_presence",
+        lambda *_: ({str(bullet.id) for bullet in bullets}, {str(bullet.id) for bullet in bullets}),
+    )
+    monkeypatch.setattr(
+        vector_store,
+        "query_dense",
+        Mock(return_value=[{"bullet_id": str(bullet_id)} for bullet_id in dense_ids]),
+    )
+    monkeypatch.setattr(
+        vector_store,
+        "query_sparse",
+        Mock(return_value=[{"bullet_id": str(bullet_id)} for bullet_id in sparse_ids]),
+    )
+
+    def rerank(_query, candidates, _top_n):
+        return [
+            {**candidate, "score": scores[candidate["bullet_id"]]}
+            for candidate in sorted(
+                candidates, key=lambda item: scores[item["bullet_id"]], reverse=True
+            )
+        ]
+
+    monkeypatch.setattr(vector_store, "rerank", Mock(side_effect=rerank))
+
+
+async def test_unknown_technology_matches_only_real_mention(monkeypatch) -> None:
+    user_id = uuid4()
+    jd, requirements, bullets = rows(
+        user_id,
+        "Apache Spark data processing",
+        ["CGPA 7.7 with coursework in operating systems", "Built Apache Spark ETL pipelines"],
+    )
+    install_pipeline(
+        monkeypatch,
+        user_id,
+        jd,
+        requirements,
+        bullets,
+        dense_ids=[bullet.id for bullet in bullets],
+        sparse_ids=[bullets[1].id],
+        scores={str(bullets[0].id): 0.000019, str(bullets[1].id): 0.032101},
     )
 
     result = await matcher.match_jd(user_id, jd.id)
 
     assert result is not None
-    assert result.items[0].bullets[0].id == bullets[0].id
-    assert result.pending_embeddings is False
+    assert [match.id for match in result.requirements[0].matched_bullets] == [bullets[1].id]
 
 
-async def test_matching_reports_pending_embeddings(monkeypatch) -> None:
+async def test_conceptual_requirement_matches_dense_paraphrase(monkeypatch) -> None:
     user_id = uuid4()
-    jd, requirements, bullets = fixture_rows(user_id)
-    monkeypatch.setattr(
-        matcher, "async_session_factory", lambda: FakeSession(jd, requirements, bullets)
+    jd, requirements, bullets = rows(
+        user_id,
+        "Cross-functional collaboration",
+        ["Coordinated designers and engineers to deliver a company-wide launch"],
     )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
+    install_pipeline(
+        monkeypatch,
+        user_id,
+        jd,
+        requirements,
+        bullets,
+        dense_ids=[bullets[0].id],
+        sparse_ids=[],
+        scores={str(bullets[0].id): 0.005},
+    )
+
+    result = await matcher.match_jd(user_id, jd.id)
+
+    assert result is not None
+    assert result.requirements[0].matched_bullets[0].id == bullets[0].id
+    assert result.requirements[0].matched_bullets[0].confidence == "moderate"
+
+
+async def test_dense_only_bullet_is_pending_and_not_matched(monkeypatch) -> None:
+    user_id = uuid4()
+    jd, requirements, bullets = rows(user_id, "Python APIs", ["Built Python APIs"])
+    install_pipeline(
+        monkeypatch,
+        user_id,
+        jd,
+        requirements,
+        bullets,
+        dense_ids=[bullets[0].id],
+        sparse_ids=[],
+        scores={str(bullets[0].id): 0.9},
     )
     monkeypatch.setattr(
         vector_store,
-        "query_similar",
-        lambda *args: [{"bullet_id": str(uuid4()), "score": 1.0, "metadata": {}}],
+        "vector_presence",
+        lambda *_: ({str(bullets[0].id)}, set()),
     )
 
     result = await matcher.match_jd(user_id, jd.id)
 
     assert result is not None
     assert result.pending_embeddings is True
-    assert result.items == []
+    assert result.requirements[0].no_match is True
+    vector_store.rerank.assert_not_called()
+
+
+async def test_rerank_score_threshold_and_confidence_bands(monkeypatch) -> None:
+    user_id = uuid4()
+    jd, requirements, bullets = rows(
+        user_id,
+        "Python APIs",
+        ["Built Python APIs", "Maintained internal services", "Painted signs"],
+    )
+    install_pipeline(
+        monkeypatch,
+        user_id,
+        jd,
+        requirements,
+        bullets,
+        dense_ids=[bullet.id for bullet in bullets],
+        sparse_ids=[bullets[0].id],
+        scores={
+            str(bullets[0].id): 0.8,
+            str(bullets[1].id): 0.005,
+            str(bullets[2].id): 0.00001,
+        },
+    )
+
+    result = await matcher.match_jd(user_id, jd.id)
+
+    assert result is not None
+    confidences = {bullet.id: bullet.confidence for item in result.items for bullet in item.bullets}
+    assert confidences == {bullets[0].id: "strong", bullets[1].id: "moderate"}
 
 
 async def test_matching_foreign_jd_returns_none(monkeypatch) -> None:
@@ -108,274 +213,15 @@ async def test_matching_foreign_jd_returns_none(monkeypatch) -> None:
     assert await matcher.match_jd(uuid4(), uuid4()) is None
 
 
-async def test_named_technology_rejects_closest_unrelated_candidate(monkeypatch) -> None:
-    user_id = uuid4()
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="Kafka", status="done")
-    requirement = JDRequirement(
-        id=uuid4(),
-        jd_id=jd.id,
-        skill="Event-driven systems using Kafka, RabbitMQ, or SQS",
-        importance="required",
-    )
-    item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="education", title="B.Tech", end_date=date.today()
-    )
-    bullet = BulletPoint(
-        id=uuid4(),
-        item_id=item.id,
-        text="CGPA 7.7; coursework in Data Structures, DBMS, OS, and Networks",
-        item=item,
-    )
-    monkeypatch.setattr(
-        matcher, "async_session_factory", lambda: FakeSession(jd, [requirement], [bullet])
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [{"bullet_id": str(bullet.id), "score": 0.99, "metadata": {}}],
-    )
-
-    result = await matcher.match_jd(user_id, jd.id)
-
-    assert result is not None
-    assert result.items == []
-    assert result.requirements[0].no_match is True
-    assert result.requirements[0].matched_bullets == []
-
-
-async def test_named_technology_matches_real_mention(monkeypatch) -> None:
-    user_id = uuid4()
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="Kafka", status="done")
-    requirement = JDRequirement(
-        id=uuid4(), jd_id=jd.id, skill="Kafka event streaming", importance="required"
-    )
-    item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="experience", title="Platform", end_date=date.today()
-    )
-    bullet = BulletPoint(
-        id=uuid4(), item_id=item.id, text="Built event streaming with Apache Kafka", item=item
-    )
-    monkeypatch.setattr(
-        matcher, "async_session_factory", lambda: FakeSession(jd, [requirement], [bullet])
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [{"bullet_id": str(bullet.id), "score": 0.70, "metadata": {}}],
-    )
-
-    result = await matcher.match_jd(user_id, jd.id)
-
-    assert result is not None
-    assert result.requirements[0].no_match is False
-    assert result.requirements[0].matched_bullets[0].id == bullet.id
-
-
-async def test_conceptual_requirement_still_matches_a_paraphrase(monkeypatch) -> None:
-    user_id = uuid4()
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="Leadership", status="done")
-    requirement = JDRequirement(
-        id=uuid4(),
-        jd_id=jd.id,
-        skill="Led cross-functional projects",
-        importance="required",
-    )
-    item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="experience", title="Lead", end_date=date.today()
-    )
-    bullet = BulletPoint(
-        id=uuid4(),
-        item_id=item.id,
-        text="Coordinated designers and engineers to deliver a company-wide launch",
-        item=item,
-    )
-    monkeypatch.setattr(
-        matcher, "async_session_factory", lambda: FakeSession(jd, [requirement], [bullet])
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [{"bullet_id": str(bullet.id), "score": 0.80, "metadata": {}}],
-    )
-
-    result = await matcher.match_jd(user_id, jd.id)
-
-    assert result is not None
-    assert result.requirements[0].matched_bullets[0].id == bullet.id
-
-
-async def test_api_confidence_uses_fixed_score_bands(monkeypatch) -> None:
-    user_id = uuid4()
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="Leadership", status="done")
-    requirement = JDRequirement(
-        id=uuid4(), jd_id=jd.id, skill="Led cross-functional projects", importance="required"
-    )
-    strong_item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="experience", title="Strong", end_date=date.today()
-    )
-    moderate_item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="project", title="Moderate", end_date=date.today()
-    )
-    strong = BulletPoint(
-        id=uuid4(), item_id=strong_item.id, text="Led cross-functional projects", item=strong_item
-    )
-    moderate = BulletPoint(
-        id=uuid4(),
-        item_id=moderate_item.id,
-        text="Coordinated specialists to deliver a shared initiative",
-        item=moderate_item,
-    )
+async def test_reranker_failure_is_a_clear_api_error(monkeypatch) -> None:
     monkeypatch.setattr(
         matcher,
-        "async_session_factory",
-        lambda: FakeSession(jd, [requirement], [strong, moderate]),
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [
-            {"bullet_id": str(strong.id), "score": 0.90, "metadata": {}},
-            {"bullet_id": str(moderate.id), "score": 0.60, "metadata": {}},
-        ],
+        "match_jd",
+        AsyncMock(side_effect=vector_store.VectorStoreError("Pinecone reranker unavailable")),
     )
 
-    result = await matcher.match_jd(user_id, jd.id)
+    with pytest.raises(HTTPException) as caught:
+        await match_api.match_job_description(uuid4(), User(id=uuid4(), email="user@example.com"))
 
-    assert result is not None
-    confidences = {bullet.id: bullet.confidence for item in result.items for bullet in item.bullets}
-    assert confidences == {strong.id: "strong", moderate.id: "moderate"}
-
-
-async def test_requirement_with_no_qualifying_candidates_is_explicit(monkeypatch) -> None:
-    user_id = uuid4()
-    jd, requirements, bullets = fixture_rows(user_id)
-    monkeypatch.setattr(
-        matcher, "async_session_factory", lambda: FakeSession(jd, requirements, bullets)
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [
-            {"bullet_id": str(bullets[0].id), "score": -0.20, "metadata": {}},
-            {"bullet_id": str(bullets[1].id), "score": -0.30, "metadata": {}},
-        ],
-    )
-
-    result = await matcher.match_jd(user_id, jd.id)
-
-    assert result is not None
-    assert result.requirements[0].no_match is True
-    assert result.requirements[0].matched_bullets == []
-
-
-async def test_dynamically_extracted_unknown_technology_requires_evidence(monkeypatch) -> None:
-    user_id = uuid4()
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="NATS", status="done")
-    requirement = JDRequirement(
-        id=uuid4(),
-        jd_id=jd.id,
-        skill="Operate NATS messaging systems",
-        importance="required",
-        named_technologies=["NATS"],
-        technology_match_mode="any",
-    )
-    item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="experience", title="Backend", end_date=date.today()
-    )
-    bullet = BulletPoint(
-        id=uuid4(), item_id=item.id, text="Built asynchronous Python APIs", item=item
-    )
-    relevant = BulletPoint(
-        id=uuid4(), item_id=item.id, text="Operated NATS JetStream in production", item=item
-    )
-    monkeypatch.setattr(
-        matcher,
-        "async_session_factory",
-        lambda: FakeSession(jd, [requirement], [bullet, relevant]),
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [
-            {"bullet_id": str(bullet.id), "score": 0.99, "metadata": {}},
-            {"bullet_id": str(relevant.id), "score": 0.70, "metadata": {}},
-        ],
-    )
-
-    result = await matcher.match_jd(user_id, jd.id)
-
-    assert result is not None
-    assert [match.id for match in result.requirements[0].matched_bullets] == [relevant.id]
-    assert result.requirements[0].technology_evidence == ["NATS"]
-
-
-async def test_dynamic_all_mode_requires_every_technology(monkeypatch) -> None:
-    user_id = uuid4()
-    jd = JobDescription(id=uuid4(), user_id=user_id, raw_text="Containers", status="done")
-    requirement = JDRequirement(
-        id=uuid4(),
-        jd_id=jd.id,
-        skill="Docker and Kubernetes",
-        importance="required",
-        named_technologies=["Docker", "Kubernetes"],
-        technology_match_mode="all",
-    )
-    item = SkillBankItem(
-        id=uuid4(), user_id=user_id, type="experience", title="Platform", end_date=date.today()
-    )
-    docker_only = BulletPoint(
-        id=uuid4(), item_id=item.id, text="Containerized services with Docker", item=item
-    )
-    both = BulletPoint(
-        id=uuid4(),
-        item_id=item.id,
-        text="Deployed Docker containers to Kubernetes",
-        item=item,
-    )
-    monkeypatch.setattr(
-        matcher,
-        "async_session_factory",
-        lambda: FakeSession(jd, [requirement], [docker_only, both]),
-    )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
-    monkeypatch.setattr(
-        matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
-    )
-    monkeypatch.setattr(
-        vector_store,
-        "query_similar",
-        lambda *args: [
-            {"bullet_id": str(docker_only.id), "score": 0.99, "metadata": {}},
-            {"bullet_id": str(both.id), "score": 0.80, "metadata": {}},
-        ],
-    )
-
-    result = await matcher.match_jd(user_id, jd.id)
-
-    assert result is not None
-    assert [bullet.id for bullet in result.requirements[0].matched_bullets] == [both.id]
-    assert result.requirements[0].technology_evidence == ["Docker", "Kubernetes"]
+    assert caught.value.status_code == 502
+    assert caught.value.detail == "Pinecone reranker unavailable"

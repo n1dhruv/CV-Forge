@@ -43,3 +43,4 @@ docs/*
 !docs/api/*.md
 
 .codegraph
+.codex
