@@ -1,8 +1,9 @@
 import type {
   BackgroundJob, BulletPoint, BulletPointInput, JobDescription, JobDescriptionListItem,
   JDParseQueued, LLMSettings, LLMSettingsInput, LLMSettingsSaved, LLMTestResult, SkillBankItem,
-  MatchResult, ResumeImport, ResumeImportCommit, ResumeImportCommitResult, ResumeImportListItem,
+  MatchQueued, ResumeImport, ResumeImportCommit, ResumeImportCommitResult, ResumeImportListItem,
   ResumeImportQueued, SkillBankItemDetail, SkillBankItemInput, SupportedModels,
+  ResumeBulletSelection, ResumeBulletSelectionUpdate, ResumeVersion, RewriteQueued,
 } from './types'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
@@ -58,7 +59,14 @@ export function createApiClient(getToken: GetToken) {
       get: (id: string) => request<JobDescription>(`/api/jd/${id}`),
       getStatus: (id: string) => request<BackgroundJob>(`/api/background_jobs/${id}`),
     },
-    match: (jdId: string) => request<MatchResult>(`/api/match/${jdId}`, { method: 'POST' }),
+    match: (jdId: string) => request<MatchQueued>(`/api/match/${jdId}`, { method: 'POST' }),
+    resumeVersions: {
+      create: (jdId: string) => request<ResumeVersion>('/api/resume_versions', { method: 'POST', body: JSON.stringify({ jd_id: jdId }) }),
+      rewrite: (id: string, bulletPointIds: string[]) => request<RewriteQueued>(`/api/resume_versions/${id}/rewrite`, { method: 'POST', body: JSON.stringify({ bullet_point_ids: bulletPointIds }) }),
+      bullets: (id: string) => request<ResumeBulletSelection[]>(`/api/resume_versions/${id}/bullets`),
+      updateBullet: (id: string, payload: ResumeBulletSelectionUpdate) => request<ResumeBulletSelection>(`/api/resume_bullet_selections/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+      finalize: (id: string) => request<ResumeVersion>(`/api/resume_versions/${id}/finalize`, { method: 'POST' }),
+    },
     resumeImports: {
       create: (file: File) => { const body = new FormData(); body.append('file', file); return request<ResumeImportQueued>('/api/resume_imports', { method: 'POST', body }) },
       list: () => request<ResumeImportListItem[]>('/api/resume_imports'),

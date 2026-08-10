@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.api.skill_bank import routes
 from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
+from app.schemas.skill_bank import ItemCreate
 from app.services import skill_bank, vector_store
 
 
@@ -68,6 +69,14 @@ def store_both(user_id, bullet_id, item_id):
     )
 
 
+def store_item(user_id, item_id):
+    metadata = {"item_id": str(item_id), "item_type": "skill"}
+    vector_store.upsert_dense_vector(user_id, item_id, [1.0], metadata, "item")
+    vector_store.upsert_sparse_vector(
+        user_id, item_id, {"indices": [1], "values": [1.0]}, metadata, "item"
+    )
+
+
 def test_dense_and_sparse_queries_share_ids_and_namespace(monkeypatch) -> None:
     indexes(monkeypatch)
     user_id, bullet_id, item_id = uuid4(), uuid4(), uuid4()
@@ -80,6 +89,7 @@ def test_dense_and_sparse_queries_share_ids_and_namespace(monkeypatch) -> None:
 
     assert vector_store.query_dense(user_id, [1.0], 1)[0]["bullet_id"] == str(bullet_id)
     assert vector_store.query_sparse(user_id, "Python", 1)[0]["bullet_id"] == str(bullet_id)
+    assert vector_store.query_dense(user_id, [1.0], 1)[0]["level"] == "bullet"
     assert vector_store.vector_presence(user_id, [bullet_id]) == (
         {str(bullet_id)},
         {str(bullet_id)},
@@ -118,6 +128,7 @@ async def test_delete_item_removes_vectors_from_both_indexes(monkeypatch) -> Non
     )
     for bullet_id in (uuid4(), uuid4()):
         store_both(user.id, bullet_id, item.id)
+    store_item(user.id, item.id)
     session = AsyncMock()
     session.scalar.return_value = item
 
@@ -125,6 +136,36 @@ async def test_delete_item_removes_vectors_from_both_indexes(monkeypatch) -> Non
 
     assert dense.vectors[str(user.id)] == {}
     assert sparse.vectors[str(user.id)] == {}
+
+
+def test_item_vectors_use_item_id_and_level_metadata(monkeypatch) -> None:
+    dense, sparse = indexes(monkeypatch)
+    user_id, item_id = uuid4(), uuid4()
+
+    store_item(user_id, item_id)
+
+    for index in (dense, sparse):
+        record = index.vectors[str(user_id)][str(item_id)]
+        assert record["metadata"]["level"] == "item"
+        assert record["metadata"]["item_id"] == str(item_id)
+        assert "bullet_id" not in record["metadata"]
+
+
+async def test_creating_bulletless_item_queues_item_embedding(monkeypatch) -> None:
+    user = User(id=uuid4(), email="a@example.com")
+    item = SkillBankItem(id=uuid4(), user_id=user.id, type="skill", title="Kafka", bullet_points=[])
+    session = AsyncMock()
+    queue = object()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(arq=queue)))
+    monkeypatch.setattr(routes.skill_bank, "create_item", AsyncMock(return_value=item))
+    monkeypatch.setattr(routes.embeddings, "enqueue_items", AsyncMock())
+
+    created = await routes.create_skill_bank_item(
+        ItemCreate(type="skill", title="Kafka"), request, session, user
+    )
+
+    assert created is item
+    routes.embeddings.enqueue_items.assert_awaited_once_with(session, queue, user.id, [item.id])
 
 
 def test_ownership_isolation_holds_in_both_indexes(monkeypatch) -> None:
@@ -153,14 +194,14 @@ def test_sparse_embedding_and_reranker_use_hosted_models(monkeypatch) -> None:
     )
     monkeypatch.setattr(vector_store, "_client", lambda: SimpleNamespace(inference=inference))
     candidates = [
-        {"bullet_id": "a", "text": "Unrelated"},
-        {"bullet_id": "b", "text": "Apache Spark pipelines"},
+        {"candidate_id": "bullet:a", "text": "Unrelated"},
+        {"candidate_id": "bullet:b", "text": "Apache Spark pipelines"},
     ]
 
     sparse = vector_store.sparse_embedding("Apache Spark", "query")
     ranked = vector_store.rerank("Apache Spark", candidates, 1)
 
     assert sparse == {"indices": [4], "values": [0.75]}
-    assert ranked == [{"bullet_id": "b", "text": "Apache Spark pipelines", "score": 0.82}]
+    assert ranked == [{"candidate_id": "bullet:b", "text": "Apache Spark pipelines", "score": 0.82}]
     assert inference.embed.call_args.kwargs["parameters"]["input_type"] == "query"
     assert inference.rerank.call_args.kwargs["model"] == "pinecone-rerank-v0"

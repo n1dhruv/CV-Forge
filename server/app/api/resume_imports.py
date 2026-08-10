@@ -137,6 +137,12 @@ async def commit_resume_import(
     if items is None:
         raise HTTPException(status_code=404, detail="Resume import not found")
     queue: ArqRedis = request.app.state.arq
+    await embeddings.enqueue_items(
+        session,
+        queue,
+        current_user.id,
+        (item.id for item in items),
+    )
     await embeddings.enqueue_bullets(
         session,
         queue,

@@ -1,0 +1,161 @@
+from typing import Annotated
+from uuid import UUID
+
+from arq.connections import ArqRedis
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import CurrentUser
+from app.db.session import get_db_session
+from app.schemas.resume_version import (
+    ResumeBulletSelectionRead,
+    ResumeBulletSelectionUpdate,
+    ResumeVersionCreate,
+    ResumeVersionRead,
+    RewriteQueued,
+    RewriteRequest,
+)
+from app.services import resume_versions, rewriter
+
+router = APIRouter(tags=["resume-versions"])
+Session = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+@router.post(
+    "/api/resume_versions", response_model=ResumeVersionRead, status_code=status.HTTP_201_CREATED
+)
+async def create_resume_version(
+    payload: ResumeVersionCreate, session: Session, current_user: CurrentUser
+) -> ResumeVersionRead:
+    version = await resume_versions.create(session, current_user.id, payload.jd_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Job description not found")
+    return ResumeVersionRead.model_validate(version)
+
+
+@router.post(
+    "/api/resume_versions/{version_id}/rewrite",
+    response_model=RewriteQueued,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_rewrite(
+    version_id: UUID,
+    payload: RewriteRequest,
+    request: Request,
+    session: Session,
+    current_user: CurrentUser,
+) -> RewriteQueued:
+    try:
+        queued = await resume_versions.queue_rewrite(
+            session, current_user.id, version_id, payload.bullet_point_ids
+        )
+    except resume_versions.InvalidResumeVersionStateError as exc:
+        raise HTTPException(status_code=409, detail="Resume version is not a draft") from exc
+    except resume_versions.InvalidBulletSelectionError as exc:
+        raise HTTPException(status_code=404, detail="One or more bullets were not found") from exc
+    if queued is None:
+        raise HTTPException(status_code=404, detail="Resume version not found")
+    version, job = queued
+    queue: ArqRedis = request.app.state.arq
+    try:
+        result = await queue.enqueue_job(
+            "rewrite_bullets_task",
+            str(version.id),
+            str(job.id),
+            str(current_user.id),
+            [str(value) for value in payload.bullet_point_ids],
+            _job_id=str(job.id),
+        )
+        if result is None:
+            raise RuntimeError("Job ID already exists")
+    except Exception as exc:
+        await resume_versions.fail_enqueue(session, version, job)
+        raise HTTPException(status_code=503, detail="Unable to enqueue rewrite") from exc
+    return RewriteQueued(resume_version_id=version.id, background_job_id=job.id)
+
+
+@router.get(
+    "/api/resume_versions/{version_id}/bullets",
+    response_model=list[ResumeBulletSelectionRead],
+)
+async def list_resume_bullets(
+    version_id: UUID, session: Session, current_user: CurrentUser
+) -> list[ResumeBulletSelectionRead]:
+    bullets = await resume_versions.list_bullets(session, current_user.id, version_id)
+    if bullets is None:
+        raise HTTPException(status_code=404, detail="Resume version not found")
+    return [ResumeBulletSelectionRead.model_validate(bullet) for bullet in bullets]
+
+
+@router.put(
+    "/api/resume_bullet_selections/{selection_id}",
+    response_model=ResumeBulletSelectionRead,
+)
+async def update_resume_bullet(
+    selection_id: UUID,
+    payload: ResumeBulletSelectionUpdate,
+    session: Session,
+    current_user: CurrentUser,
+) -> ResumeBulletSelectionRead:
+    owned = await resume_versions.get_selection_owned(session, current_user.id, selection_id)
+    if owned is None:
+        raise HTTPException(status_code=404, detail="Resume bullet selection not found")
+    selection, version = owned
+    if version.status == "finalized":
+        raise HTTPException(status_code=409, detail="Finalized resume versions cannot be changed")
+
+    if payload.revert:
+        selection.rewritten_text = selection.original_text
+        selection.approved = False
+        selection.resolved = True
+        selection.flagged_terms = []
+        selection.low_effort_rewrite = False
+    else:
+        if payload.rewritten_text is not None:
+            if rewriter.number_tokens(payload.rewritten_text) != rewriter.number_tokens(
+                selection.original_text
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Edited text must preserve every number and metric exactly",
+                )
+            selection.rewritten_text = payload.rewritten_text
+            selection.approved = False
+            selection.resolved = False
+            selection.low_effort_rewrite = False
+            selection.flagged_terms = [
+                flag
+                for flag in selection.flagged_terms
+                if flag.get("reason") == "new_technology"
+                and rewriter.contains_term(payload.rewritten_text, flag.get("term", ""))
+            ]
+        if payload.approved is not None:
+            selection.approved = payload.approved
+            selection.resolved = payload.approved
+    await session.commit()
+    await session.refresh(selection)
+    return ResumeBulletSelectionRead.model_validate(selection)
+
+
+@router.post("/api/resume_versions/{version_id}/finalize", response_model=ResumeVersionRead)
+async def finalize_resume_version(
+    version_id: UUID, session: Session, current_user: CurrentUser
+) -> ResumeVersionRead:
+    try:
+        result = await resume_versions.finalize(session, current_user.id, version_id)
+    except resume_versions.InvalidResumeVersionStateError as exc:
+        raise HTTPException(
+            status_code=409, detail="Resume version is not ready for review"
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Resume version not found")
+    version, unresolved = result
+    if unresolved or version.status != "finalized":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Every bullet must be approved or reverted before finalizing. "
+                f"Unresolved selection IDs: {', '.join(str(value) for value in unresolved)}"
+            ),
+        )
+    return ResumeVersionRead.model_validate(version)

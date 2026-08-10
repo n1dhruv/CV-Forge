@@ -5,17 +5,31 @@ from arq.connections import ArqRedis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.jobs import BackgroundJob
+from app.models.skill_bank import SkillBankItem
 
 
-async def enqueue_bullets(
+def item_text(item: SkillBankItem) -> str:
+    return "\n".join(
+        part
+        for part in (
+            item.title.strip(),
+            f"Tags: {', '.join(item.tags)}" if item.tags else "",
+            item.raw_text.strip() if item.raw_text else "",
+        )
+        if part
+    )
+
+
+async def _enqueue(
     session: AsyncSession,
     queue: ArqRedis,
     user_id: UUID,
-    bullet_ids: Iterable[UUID],
+    record_ids: Iterable[UUID],
+    task_name: str,
 ) -> None:
     jobs = [
-        (bullet_id, BackgroundJob(user_id=user_id, job_type="embedding", status="queued"))
-        for bullet_id in dict.fromkeys(bullet_ids)
+        (record_id, BackgroundJob(user_id=user_id, job_type="embedding", status="queued"))
+        for record_id in dict.fromkeys(record_ids)
     ]
     if not jobs:
         return
@@ -23,11 +37,11 @@ async def enqueue_bullets(
     await session.commit()
     for _, job in jobs:
         await session.refresh(job)
-    for bullet_id, job in jobs:
+    for record_id, job in jobs:
         try:
             queued = await queue.enqueue_job(
-                "embed_bullet_task",
-                str(bullet_id),
+                task_name,
+                str(record_id),
                 str(job.id),
                 str(user_id),
                 _job_id=str(job.id),
@@ -36,5 +50,23 @@ async def enqueue_bullets(
                 raise RuntimeError("Job ID already exists")
         except Exception:
             job.status = "failed"
-            job.error = "Unable to enqueue embedding — edit the bullet to retry"
+            job.error = "Unable to enqueue embedding — edit the source to retry"
     await session.commit()
+
+
+async def enqueue_bullets(
+    session: AsyncSession,
+    queue: ArqRedis,
+    user_id: UUID,
+    bullet_ids: Iterable[UUID],
+) -> None:
+    await _enqueue(session, queue, user_id, bullet_ids, "embed_bullet_task")
+
+
+async def enqueue_items(
+    session: AsyncSession,
+    queue: ArqRedis,
+    user_id: UUID,
+    item_ids: Iterable[UUID],
+) -> None:
+    await _enqueue(session, queue, user_id, item_ids, "embed_item_task")

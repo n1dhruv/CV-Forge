@@ -3,11 +3,13 @@ from collections import defaultdict
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import async_session_factory
+from app.models.jobs import BackgroundJob
 from app.models.resume import JDRequirement, JobDescription
-from app.models.skill_bank import BulletPoint, SkillBankItem
+from app.models.skill_bank import SkillBankItem
 from app.schemas.match import (
     MatchResult,
     MatchedBullet,
@@ -15,11 +17,41 @@ from app.schemas.match import (
     MatchedRequirement,
     RequirementMatch,
 )
-from app.services import llm_client, vector_store
+from app.services import embeddings, llm_client, vector_store
 
 SEARCH_TOP_K = 25
 MIN_RERANK_SCORE = 0.0001
 STRONG_RERANK_SCORE = 0.01
+
+
+async def create_match_job(
+    session: AsyncSession, user_id: UUID, jd_id: UUID
+) -> BackgroundJob | None:
+    description = await session.scalar(
+        select(JobDescription).where(
+            JobDescription.id == jd_id,
+            JobDescription.user_id == user_id,
+            JobDescription.status == "done",
+        )
+    )
+    if description is None:
+        return None
+    job = BackgroundJob(
+        user_id=user_id,
+        job_type="match",
+        status="queued",
+        result={"jd_id": str(jd_id)},
+    )
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+async def fail_match_enqueue(session: AsyncSession, job: BackgroundJob) -> None:
+    job.status = "failed"
+    job.error = "Unable to enqueue matching — try again"
+    await session.commit()
 
 
 def _confidence(score: float) -> str | None:
@@ -58,12 +90,11 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
         requirements = list(
             (await session.scalars(select(JDRequirement).where(JDRequirement.jd_id == jd_id))).all()
         )
-        bullets = list(
+        items = list(
             (
                 await session.scalars(
-                    select(BulletPoint)
-                    .join(SkillBankItem)
-                    .options(selectinload(BulletPoint.item))
+                    select(SkillBankItem)
+                    .options(selectinload(SkillBankItem.bullet_points))
                     .where(SkillBankItem.user_id == user_id)
                 )
             ).all()
@@ -71,7 +102,7 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
 
     if not requirements:
         return MatchResult(jd_id=jd_id, pending_embeddings=False, requirements=[], items=[])
-    if not bullets:
+    if not items:
         return MatchResult(
             jd_id=jd_id,
             pending_embeddings=False,
@@ -79,14 +110,16 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
             items=[],
         )
 
-    bullets_by_id = {bullet.id: bullet for bullet in bullets}
+    items_by_id = {item.id: item for item in items}
+    bullets_by_id = {bullet.id: bullet for item in items for bullet in item.bullet_points}
+    record_ids = [*bullets_by_id, *items_by_id]
     dense_ids, sparse_ids = await asyncio.to_thread(
-        vector_store.vector_presence, user_id, list(bullets_by_id)
+        vector_store.vector_presence, user_id, record_ids
     )
     ready_ids = dense_ids & sparse_ids
-    pending_embeddings = len(ready_ids) < len(bullets_by_id)
-    matches_by_bullet: dict[UUID, list[MatchedRequirement]] = defaultdict(list)
-    bullet_ids_by_requirement: dict[UUID, list[UUID]] = defaultdict(list)
+    pending_embeddings = any(str(record_id) not in ready_ids for record_id in record_ids)
+    matches_by_source: dict[tuple[str, UUID], list[MatchedRequirement]] = defaultdict(list)
+    source_ids_by_requirement: dict[UUID, list[tuple[str, UUID]]] = defaultdict(list)
 
     for requirement in requirements:
         embedding = await llm_client.get_embedding(user_id, requirement.skill)
@@ -94,26 +127,41 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
             asyncio.to_thread(vector_store.query_dense, user_id, embedding, SEARCH_TOP_K),
             asyncio.to_thread(vector_store.query_sparse, user_id, requirement.skill, SEARCH_TOP_K),
         )
-        candidate_ids: list[UUID] = []
-        seen: set[UUID] = set()
+        candidates = []
+        seen: set[tuple[str, UUID]] = set()
         for match in dense_matches + sparse_matches:
+            level = str(match.get("level") or match.get("metadata", {}).get("level", "bullet"))
             try:
-                bullet_id = UUID(str(match["bullet_id"]))
+                record_id = UUID(str(match["item_id"] if level == "item" else match["bullet_id"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            if (
-                bullet_id in seen
-                or str(bullet_id) not in ready_ids
-                or bullet_id not in bullets_by_id
-            ):
+            source = (level, record_id)
+            if source in seen or str(record_id) not in ready_ids:
                 continue
-            seen.add(bullet_id)
-            candidate_ids.append(bullet_id)
-
-        candidates = [
-            {"bullet_id": str(bullet_id), "text": bullets_by_id[bullet_id].text}
-            for bullet_id in candidate_ids
-        ]
+            if level == "item":
+                item = items_by_id.get(record_id)
+                if item is None:
+                    continue
+                text = embeddings.item_text(item)
+                item_id = item.id
+            else:
+                bullet = bullets_by_id.get(record_id)
+                if bullet is None:
+                    continue
+                text = bullet.text
+                item_id = bullet.item_id
+                level = "bullet"
+                source = (level, record_id)
+            seen.add(source)
+            candidates.append(
+                {
+                    "candidate_id": f"{level}:{record_id}",
+                    "level": level,
+                    "record_id": str(record_id),
+                    "item_id": str(item_id),
+                    "text": text,
+                }
+            )
         ranked = (
             await asyncio.to_thread(
                 vector_store.rerank, requirement.skill, candidates, len(candidates)
@@ -121,42 +169,65 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
             if candidates
             else []
         )
+        accepted = []
         for candidate in ranked:
             score = float(candidate["score"])
             confidence = _confidence(score)
             if confidence is None:
                 continue
-            bullet_id = UUID(str(candidate["bullet_id"]))
-            matches_by_bullet[bullet_id].append(
+            accepted.append({**candidate, "score": score, "confidence": confidence})
+
+        by_item: dict[str, list[dict]] = defaultdict(list)
+        for candidate in accepted:
+            by_item[candidate["item_id"]].append(candidate)
+        deduplicated = []
+        for item_candidates in by_item.values():
+            if {candidate["level"] for candidate in item_candidates} == {"item", "bullet"}:
+                deduplicated.append(max(item_candidates, key=lambda candidate: candidate["score"]))
+            else:
+                deduplicated.extend(item_candidates)
+
+        for candidate in deduplicated:
+            source = (candidate["level"], UUID(candidate["record_id"]))
+            matches_by_source[source].append(
                 MatchedRequirement(
                     id=requirement.id,
                     text=requirement.skill,
-                    score=score,
-                    confidence=confidence,
+                    score=candidate["score"],
+                    confidence=candidate["confidence"],
                     technology_evidence=[],
                 )
             )
-            bullet_ids_by_requirement[requirement.id].append(bullet_id)
+            source_ids_by_requirement[requirement.id].append(source)
 
     grouped: dict[UUID, list[MatchedBullet]] = defaultdict(list)
-    matched_bullets_by_id: dict[UUID, MatchedBullet] = {}
-    for bullet_id, requirement_matches in matches_by_bullet.items():
+    matched_by_source: dict[tuple[str, UUID], MatchedBullet] = {}
+    for source, requirement_matches in matches_by_source.items():
         requirement_matches.sort(key=lambda item: item.score, reverse=True)
-        bullet = bullets_by_id[bullet_id]
+        level, record_id = source
+        if level == "item":
+            item = items_by_id[record_id]
+            text = embeddings.item_text(item)
+            item_id = item.id
+        else:
+            bullet = bullets_by_id[record_id]
+            text = bullet.text
+            item_id = bullet.item_id
         matched_bullet = MatchedBullet(
-            id=bullet.id,
-            text=bullet.text,
+            bullet_point_id=record_id if level == "bullet" else None,
+            skill_bank_item_id=record_id if level == "item" else None,
+            text=text,
             score=requirement_matches[0].score,
             confidence=requirement_matches[0].confidence,
             requirements=requirement_matches,
         )
-        matched_bullets_by_id[bullet_id] = matched_bullet
-        grouped[bullet.item_id].append(matched_bullet)
+        matched_by_source[source] = matched_bullet
+        grouped[item_id].append(matched_bullet)
 
     items = []
     for item_id, matched_bullets in grouped.items():
         matched_bullets.sort(key=lambda bullet: bullet.score, reverse=True)
-        item = bullets_by_id[matched_bullets[0].id].item
+        item = items_by_id[item_id]
         items.append(
             MatchedItem(
                 id=item_id,
@@ -173,8 +244,7 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
     requirement_matches = []
     for requirement in requirements:
         matched_bullets = [
-            matched_bullets_by_id[bullet_id]
-            for bullet_id in bullet_ids_by_requirement[requirement.id]
+            matched_by_source[source] for source in source_ids_by_requirement[requirement.id]
         ]
         matched_bullets.sort(
             key=lambda bullet: next(

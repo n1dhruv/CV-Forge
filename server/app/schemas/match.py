@@ -2,7 +2,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class MatchedRequirement(BaseModel):
@@ -14,11 +14,18 @@ class MatchedRequirement(BaseModel):
 
 
 class MatchedBullet(BaseModel):
-    id: UUID
+    bullet_point_id: UUID | None = None
+    skill_bank_item_id: UUID | None = None
     text: str
     score: float
     confidence: Literal["strong", "moderate"]
     requirements: list[MatchedRequirement]
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> "MatchedBullet":
+        if (self.bullet_point_id is None) == (self.skill_bank_item_id is None):
+            raise ValueError("exactly one match source ID is required")
+        return self
 
 
 class MatchedItem(BaseModel):
@@ -47,3 +54,8 @@ class MatchResult(BaseModel):
     pending_embeddings: bool
     requirements: list[RequirementMatch]
     items: list[MatchedItem]
+
+
+class MatchQueued(BaseModel):
+    jd_id: UUID
+    background_job_id: UUID

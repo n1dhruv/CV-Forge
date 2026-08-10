@@ -70,7 +70,7 @@ export interface LLMSettings {
 export interface LLMSettingsInput {
   provider: string
   model: string
-  api_key: string
+  api_key?: string
   embedding_provider?: string
   embedding_model?: string
   embedding_api_key?: string
@@ -92,7 +92,14 @@ export interface MatchedRequirement {
   confidence: MatchConfidence
   technology_evidence: string[]
 }
-export interface MatchedBullet { id: string; text: string; score: number; confidence: MatchConfidence; requirements: MatchedRequirement[] }
+export interface MatchedBullet {
+  bullet_point_id: string | null
+  skill_bank_item_id: string | null
+  text: string
+  score: number
+  confidence: MatchConfidence
+  requirements: MatchedRequirement[]
+}
 export interface MatchedItem {
   id: string
   type: string
@@ -117,6 +124,33 @@ export interface MatchResult {
   pending_embeddings: boolean
   requirements: RequirementMatch[]
   items: MatchedItem[]
+}
+export interface MatchQueued { jd_id: string; background_job_id: string }
+
+export type ResumeVersionStatus = 'draft' | 'rewriting' | 'reviewing' | 'finalized'
+export interface ResumeVersion { id: string; jd_id: string | null; status: ResumeVersionStatus; tex_source: string | null; }
+export interface RewriteQueued { resume_version_id: string; background_job_id: string }
+export interface GuardrailFlag {
+  term: string
+  reason: 'number_changed' | 'new_technology' | 'unsupported_claim'
+  message: string
+}
+export interface ResumeBulletSelection {
+  id: string
+  resume_version_id: string
+  bullet_point_id: string
+  original_text: string
+  rewritten_text: string | null
+  approved: boolean
+  resolved: boolean
+  flagged_terms: GuardrailFlag[]
+  low_effort_rewrite: boolean
+  section_order: number
+}
+export interface ResumeBulletSelectionUpdate {
+  rewritten_text?: string
+  approved?: boolean
+  revert?: boolean
 }
 
 export type ResumeImportItemType = 'experience' | 'project' | 'education' | 'certification'
@@ -148,6 +182,6 @@ export interface DemoBullet { id: string; text: string; tags: DemoTag[]; metrics
 export interface DemoSkillBankItem { id: string; type: Exclude<ItemType, 'certification'>; title: string; organization?: string; location?: string; startDate?: string; endDate?: string; description?: string; bullets: DemoBullet[]; skills: DemoTag[] }
 export interface DemoParsedJobDescription { id: string; company: string; role: string; seniority: string; requiredSkills: string[]; niceToHaveSkills: string[]; atsKeywords: string[]; responsibilities: string[]; rawText: string }
 export interface AsyncJob<T> { id: string; state: JobState; progress: number; stage: string; result?: T; error?: string }
-export interface ResumeVersion { id: string; name: string; company: string; role: string; updatedAt: string; atsScore: number; texSource: string; pdfUrl?: string }
+
 export interface RewriteSuggestion { id: string; section: string; sourceBullet: DemoBullet; tailoredText: string; relevance: number; matchedKeywords: string[]; decision: 'pending' | 'approved' | 'rejected' }
 export interface Integration { provider: 'github' | 'leetcode'; connected: boolean; handle?: string; lastSyncedAt?: string; inferredSkills: DemoTag[]; state: JobState }

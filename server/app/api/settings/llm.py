@@ -41,7 +41,10 @@ async def supported_embedding_models() -> dict[str, list[str]]:
 async def save_llm_settings(
     payload: LLMSettingsCreate, session: Session, current_user: CurrentUser
 ) -> LLMSettingsSaved:
-    settings = await llm_settings.save_for_user(session, current_user.id, payload)
+    try:
+        settings = await llm_settings.save_for_user(session, current_user.id, payload)
+    except llm_settings.MissingAPIKeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return LLMSettingsSaved(
         provider=settings.provider,
         model=settings.model,

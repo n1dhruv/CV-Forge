@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     Text,
+    UniqueConstraint,
     text as sql_text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -91,6 +92,12 @@ class ResumeImport(Base):
 
 class ResumeVersion(Base):
     __tablename__ = "resume_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('draft','rewriting','reviewing','finalized')",
+            name="resume_versions_status_check",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=sql_text("uuid_generate_v4()")
     )
@@ -98,15 +105,23 @@ class ResumeVersion(Base):
     jd_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("job_descriptions.id", ondelete="SET NULL")
     )
-    tex_source: Mapped[str] = mapped_column(Text)
+    tex_source: Mapped[str | None] = mapped_column(Text)
     pdf_storage_path: Mapped[str | None] = mapped_column(Text)
     ats_score: Mapped[Decimal | None] = mapped_column(Numeric)
     parent_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("resume_versions.id"))
+    status: Mapped[str] = mapped_column(Text, server_default=sql_text("'draft'"))
     created_at: Mapped[datetime] = mapped_column(server_default=sql_text("now()"))
 
 
 class ResumeBulletSelection(Base):
     __tablename__ = "resume_bullet_selections"
+    __table_args__ = (
+        UniqueConstraint(
+            "resume_version_id",
+            "bullet_point_id",
+            name="resume_bullet_selections_version_bullet_key",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=sql_text("uuid_generate_v4()")
     )
@@ -119,4 +134,7 @@ class ResumeBulletSelection(Base):
     original_text: Mapped[str] = mapped_column(Text)
     rewritten_text: Mapped[str | None] = mapped_column(Text)
     approved: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("false"))
+    resolved: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("false"))
+    flagged_terms: Mapped[list[dict]] = mapped_column(JSONB, server_default=sql_text("'[]'::jsonb"))
+    low_effort_rewrite: Mapped[bool] = mapped_column(Boolean, server_default=sql_text("false"))
     section_order: Mapped[int] = mapped_column(Integer, server_default=sql_text("0"))
