@@ -117,7 +117,6 @@ export interface RequirementMatch {
   technology_match_mode: 'any' | 'all' | null
   technology_evidence: string[]
   no_match: boolean
-  matched_bullets: MatchedBullet[]
 }
 export interface MatchResult {
   jd_id: string
@@ -125,8 +124,6 @@ export interface MatchResult {
   requirements: RequirementMatch[]
   items: MatchedItem[]
 }
-export interface MatchQueued { jd_id: string; background_job_id: string }
-
 export type ResumeVersionStatus = 'draft' | 'rewriting' | 'reviewing' | 'finalized'
 export interface ResumeVersion { id: string; jd_id: string | null; status: ResumeVersionStatus; tex_source: string | null; }
 export interface RewriteQueued { resume_version_id: string; background_job_id: string }

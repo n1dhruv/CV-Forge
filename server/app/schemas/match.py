@@ -46,7 +46,6 @@ class RequirementMatch(BaseModel):
     technology_match_mode: Literal["any", "all"] | None
     technology_evidence: list[str]
     no_match: bool
-    matched_bullets: list[MatchedBullet]
 
 
 class MatchResult(BaseModel):
@@ -54,8 +53,3 @@ class MatchResult(BaseModel):
     pending_embeddings: bool
     requirements: list[RequirementMatch]
     items: list[MatchedItem]
-
-
-class MatchQueued(BaseModel):
-    jd_id: UUID
-    background_job_id: UUID

@@ -137,10 +137,10 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/match/{jd_id}
 **Auth required:** yes  
-**Description:** Creates and queues an owned background matching job; no embedding, Pinecone query, or reranking runs in the API request.  
+**Description:** Matches an owned, completed JD synchronously in the API request.  
 **Request:** JD UUID.  
-**Response:** `202` with `jd_id` and `background_job_id`. The completed grouped evidence is later stored in `background_jobs.result` and read through `GET /api/background_jobs/{job_id}`.
-**Errors:** `404` for a foreign, missing, or incomplete JD; `503` if Redis/ARQ enqueueing fails. Provider and Pinecone failures appear on the background job instead of this response.
+**Response:** `200` with the completed grouped `MatchResult`.
+**Errors:** `400` if embeddings are not configured; `404` for a foreign, missing, or incomplete JD; `422` for an unsupported embedding model; `502` for embedding, Pinecone, or OpenRouter failures.
 
 ### GET /api/background_jobs/{job_id}
 **Auth required:** yes  

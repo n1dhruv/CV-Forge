@@ -1,6 +1,5 @@
 import asyncio
 from datetime import date
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -78,7 +77,11 @@ def install_pipeline(
     monkeypatch.setattr(
         matcher, "async_session_factory", lambda: FakeSession(jd, requirements, items)
     )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
+    monkeypatch.setattr(
+        llm_client,
+        "get_embeddings",
+        AsyncMock(return_value=[[1.0] for _ in requirements]),
+    )
     monkeypatch.setattr(
         matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
     )
@@ -139,9 +142,10 @@ async def test_unknown_technology_matches_only_real_mention(monkeypatch) -> None
     result = await matcher.match_jd(user_id, jd.id)
 
     assert result is not None
-    assert [match.bullet_point_id for match in result.requirements[0].matched_bullets] == [
+    assert [match.bullet_point_id for item in result.items for match in item.bullets] == [
         bullets[1].id
     ]
+    assert "matched_bullets" not in result.requirements[0].model_dump()
 
 
 async def test_conceptual_requirement_matches_dense_paraphrase(monkeypatch) -> None:
@@ -165,8 +169,35 @@ async def test_conceptual_requirement_matches_dense_paraphrase(monkeypatch) -> N
     result = await matcher.match_jd(user_id, jd.id)
 
     assert result is not None
-    assert result.requirements[0].matched_bullets[0].bullet_point_id == bullets[0].id
-    assert result.requirements[0].matched_bullets[0].confidence == "moderate"
+    assert result.items[0].bullets[0].bullet_point_id == bullets[0].id
+    assert result.items[0].bullets[0].confidence == "moderate"
+
+
+async def test_matcher_batches_requirement_embeddings(monkeypatch) -> None:
+    user_id = uuid4()
+    jd, requirements, bullets = rows(user_id, "Python APIs", ["Built Python APIs"])
+    requirements.append(
+        JDRequirement(
+            id=uuid4(),
+            jd_id=jd.id,
+            skill="Apache Kafka",
+            importance="nice_to_have",
+        )
+    )
+    install_pipeline(
+        monkeypatch,
+        user_id,
+        jd,
+        requirements,
+        bullets,
+        dense_ids=[bullets[0].id],
+        sparse_ids=[bullets[0].id],
+        scores={str(bullets[0].id): 0.8},
+    )
+
+    await matcher.match_jd(user_id, jd.id)
+
+    llm_client.get_embeddings.assert_awaited_once_with(user_id, ["Python APIs", "Apache Kafka"])
 
 
 async def test_dense_only_bullet_is_pending_and_not_matched(monkeypatch) -> None:
@@ -243,7 +274,7 @@ async def test_bulletless_kafka_skill_matches_requirement(monkeypatch) -> None:
     monkeypatch.setattr(
         matcher, "async_session_factory", lambda: FakeSession(jd, [requirement], [item])
     )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
+    monkeypatch.setattr(llm_client, "get_embeddings", AsyncMock(return_value=[[1.0]]))
     monkeypatch.setattr(
         matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
     )
@@ -264,7 +295,7 @@ async def test_bulletless_kafka_skill_matches_requirement(monkeypatch) -> None:
     result = await matcher.match_jd(user_id, jd.id)
 
     assert result is not None
-    match = result.requirements[0].matched_bullets[0]
+    match = result.items[0].bullets[0]
     assert match.skill_bank_item_id == item.id
     assert match.bullet_point_id is None
     assert match.text == "Kafka"
@@ -279,7 +310,7 @@ async def test_unembedded_bulletless_skill_sets_pending(monkeypatch) -> None:
     monkeypatch.setattr(
         matcher, "async_session_factory", lambda: FakeSession(jd, [requirement], [item])
     )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
+    monkeypatch.setattr(llm_client, "get_embeddings", AsyncMock(return_value=[[1.0]]))
     monkeypatch.setattr(
         matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
     )
@@ -305,7 +336,7 @@ async def test_item_and_child_bullet_are_deduplicated_per_requirement(monkeypatc
     monkeypatch.setattr(
         matcher, "async_session_factory", lambda: FakeSession(jd, [requirement], [item])
     )
-    monkeypatch.setattr(llm_client, "get_embedding", AsyncMock(return_value=[1.0]))
+    monkeypatch.setattr(llm_client, "get_embeddings", AsyncMock(return_value=[[1.0]]))
     monkeypatch.setattr(
         matcher.asyncio, "to_thread", AsyncMock(side_effect=lambda function, *args: function(*args))
     )
@@ -327,9 +358,9 @@ async def test_item_and_child_bullet_are_deduplicated_per_requirement(monkeypatc
     result = await matcher.match_jd(user_id, jd.id)
 
     assert result is not None
-    assert len(result.requirements[0].matched_bullets) == 1
-    assert result.requirements[0].matched_bullets[0].bullet_point_id == bullet.id
-    assert result.requirements[0].matched_bullets[0].skill_bank_item_id is None
+    assert len(result.items[0].bullets) == 1
+    assert result.items[0].bullets[0].bullet_point_id == bullet.id
+    assert result.items[0].bullets[0].skill_bank_item_id is None
 
 
 def test_match_evidence_requires_exactly_one_source_id() -> None:
@@ -349,47 +380,35 @@ def test_match_evidence_requires_exactly_one_source_id() -> None:
         )
 
 
-async def test_match_api_queues_worker_without_running_matcher(monkeypatch) -> None:
+async def test_match_api_returns_matcher_result(monkeypatch) -> None:
     user = User(id=uuid4(), email="user@example.com")
     jd_id = uuid4()
-    job = BackgroundJob(id=uuid4(), user_id=user.id, job_type="match", status="queued")
-    queue = SimpleNamespace(enqueue_job=AsyncMock(return_value=object()))
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(arq=queue)))
-    monkeypatch.setattr(matcher, "create_match_job", AsyncMock(return_value=job))
-    monkeypatch.setattr(matcher, "match_jd", AsyncMock())
+    match = MatchResult(jd_id=jd_id, pending_embeddings=False, requirements=[], items=[])
+    monkeypatch.setattr(matcher, "match_jd", AsyncMock(return_value=match))
 
-    result = await match_api.match_job_description(jd_id, request, AsyncMock(), user)
+    result = await match_api.match_job_description(jd_id, user)
 
-    assert result.jd_id == jd_id
-    assert result.background_job_id == job.id
-    queue.enqueue_job.assert_awaited_once_with(
-        "match_jd_task",
-        str(jd_id),
-        str(job.id),
-        str(user.id),
-        _job_id=str(job.id),
-    )
-    matcher.match_jd.assert_not_awaited()
+    assert result is match
+    matcher.match_jd.assert_awaited_once_with(user.id, jd_id)
 
 
-async def test_match_queue_failure_is_persisted(monkeypatch) -> None:
+async def test_match_api_returns_vector_failure(monkeypatch) -> None:
     user = User(id=uuid4(), email="user@example.com")
-    job = BackgroundJob(id=uuid4(), user_id=user.id, job_type="match", status="queued")
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                arq=SimpleNamespace(enqueue_job=AsyncMock(side_effect=RuntimeError))
+    monkeypatch.setattr(
+        matcher,
+        "match_jd",
+        AsyncMock(
+            side_effect=vector_store.VectorStoreError(
+                "OpenRouter reranker unavailable (429)"
             )
-        )
+        ),
     )
-    monkeypatch.setattr(matcher, "create_match_job", AsyncMock(return_value=job))
-    monkeypatch.setattr(matcher, "fail_match_enqueue", AsyncMock())
 
     with pytest.raises(HTTPException) as caught:
-        await match_api.match_job_description(uuid4(), request, AsyncMock(), user)
+        await match_api.match_job_description(uuid4(), user)
 
-    assert caught.value.status_code == 503
-    matcher.fail_match_enqueue.assert_awaited_once()
+    assert caught.value.status_code == 502
+    assert caught.value.detail == "OpenRouter reranker unavailable (429)"
 
 
 async def test_match_worker_persists_success(monkeypatch) -> None:

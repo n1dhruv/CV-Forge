@@ -1,6 +1,6 @@
 # AI pipelines
 
-Before using embeddings, create two serverless Pinecone indexes. The dense index (`resumeforge-bullets`) uses cosine similarity and a dimension matching the configured BYOK embedding model. The sparse index (`resumeforge-bullets-sparse`) uses vector type `sparse`, dot-product similarity, and no fixed dimension. Set `PINECONE_INDEX_NAME`, `PINECONE_HOST`, `PINECONE_SPARSE_INDEX_NAME`, `PINECONE_RERANK_MODEL=pinecone-rerank-v0`, and the shared `PINECONE_API_KEY`.
+Before using embeddings, create two serverless Pinecone indexes. The dense index (`resumeforge-bullets`) uses cosine similarity and a dimension matching the configured BYOK embedding model. The sparse index (`resumeforge-bullets-sparse`) uses vector type `sparse`, dot-product similarity, and no fixed dimension. Set `PINECONE_INDEX_NAME`, `PINECONE_HOST`, `PINECONE_SPARSE_INDEX_NAME`, and the shared `PINECONE_API_KEY`. Reranking uses `OPENROUTER_API_KEY` and `OPENROUTER_RERANK_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2:free`.
 
 Before using resume import, create a **private** bucket named `resume-imports` at **Supabase Dashboard → Storage → New bucket**, and set `SUPABASE_STORAGE_BUCKET_RESUME_IMPORTS=resume-imports`. Storage schema metadata is not written by Alembic.
 
@@ -19,11 +19,11 @@ Before using resume import, create a **private** bucket named `resume-imports` a
 2. The CRUD request returns without waiting for the LLM or Pinecone.
 3. The worker loads the real PostgreSQL row. Bullet text is embedded directly; item text combines the item's title, tags, and raw text. In parallel it calls the user's configured dense embedding provider and Pinecone's hosted `pinecone-sparse-english-v0` passage encoder, then writes the result to both indexes. A partial failure records which write succeeded and leaves the job failed so the source can be retried.
 4. Both indexes store every user's vectors in a namespace named with that user's UUID. Vector IDs equal the source `bullet_points.id` or `skill_bank_items.id`. Metadata uses `level=bullet` or `level=item`; bullet vectors include `bullet_id`, while item vectors omit that key because Pinecone does not support null metadata. Both levels include `item_id` and `item_type`. PostgreSQL remains the source of truth.
-5. `POST /api/match/{jd_id}` validates the completed owned JD, creates a `background_jobs` row with `job_type=match`, queues `match_jd_task`, and immediately returns `202` with the job ID. The API request does not call embedding or Pinecone providers.
-6. The worker confirms every owned item and bullet exists in both indexes. Any source missing either vector is ineligible and sets `pending_embeddings=true`.
-7. For each requirement, the worker creates its BYOK dense embedding and concurrently retrieves up to 25 candidates from each index. Results are merged and deduplicated by `(level, source UUID)`, then the corresponding owned item or bullet text is loaded from PostgreSQL.
-8. The unified candidate set is sent to Pinecone's hosted reranker. If an item-level vector and one of its bullets both qualify for the same requirement, only the higher-scoring level is kept. Candidates below `MIN_RERANK_SCORE=0.0001` are excluded; confidence is `strong >= 0.01` or `moderate >= 0.0001`.
-9. The complete validated `MatchResult` is persisted in `background_jobs.result` JSONB and the job is marked `done`. Provider/vector failures are persisted as a safe job error instead of returning an HTTP 502. The review UI follows the existing Supabase Realtime status channel, with polling fallback, and renders only the completed stored result.
+5. `POST /api/match/{jd_id}` validates the completed owned JD and runs matching in the API request.
+6. The API confirms every owned item and bullet exists in both indexes. Any source missing either vector is ineligible and sets `pending_embeddings=true`.
+7. For each requirement, the API creates its BYOK dense embedding and concurrently retrieves up to 25 candidates from each index. Results are merged and deduplicated by `(level, source UUID)`, then the corresponding owned item or bullet text is loaded from PostgreSQL.
+8. The unified candidate set is sent to OpenRouter's hosted reranker. If an item-level vector and one of its bullets both qualify for the same requirement, only the higher-scoring level is kept. Candidates below `MIN_RERANK_SCORE=0.0001` are excluded; confidence is `strong >= 0.01` or `moderate >= 0.0001`.
+9. The API returns the complete validated `MatchResult`. Provider/vector failures return HTTP 502 and are visible in browser developer tools.
 10. Deleting a bullet removes its vectors. Deleting an item removes both its own item-ID vectors and every child bullet vector from both indexes before deleting PostgreSQL content, preventing stale results from resurfacing.
 
 ## Resume import

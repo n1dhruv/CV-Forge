@@ -190,9 +190,11 @@ def test_ownership_isolation_holds_in_both_indexes(monkeypatch) -> None:
 def test_sparse_embedding_and_reranker_use_hosted_models(monkeypatch) -> None:
     inference = SimpleNamespace(
         embed=Mock(return_value=[{"sparse_indices": [4], "sparse_values": [0.75]}]),
-        rerank=Mock(return_value=SimpleNamespace(data=[SimpleNamespace(index=1, score=0.82)])),
     )
     monkeypatch.setattr(vector_store, "_client", lambda: SimpleNamespace(inference=inference))
+    response = Mock()
+    response.json.return_value = {"results": [{"index": 1, "relevance_score": 0.82}]}
+    monkeypatch.setattr(vector_store.httpx, "post", Mock(return_value=response))
     candidates = [
         {"candidate_id": "bullet:a", "text": "Unrelated"},
         {"candidate_id": "bullet:b", "text": "Apache Spark pipelines"},
@@ -204,4 +206,10 @@ def test_sparse_embedding_and_reranker_use_hosted_models(monkeypatch) -> None:
     assert sparse == {"indices": [4], "values": [0.75]}
     assert ranked == [{"candidate_id": "bullet:b", "text": "Apache Spark pipelines", "score": 0.82}]
     assert inference.embed.call_args.kwargs["parameters"]["input_type"] == "query"
-    assert inference.rerank.call_args.kwargs["model"] == "pinecone-rerank-v0"
+    assert vector_store.httpx.post.call_args.kwargs["json"]["model"] == (
+        "nvidia/llama-nemotron-rerank-vl-1b-v2:free"
+    )
+    assert vector_store.httpx.post.call_args.kwargs["json"]["documents"] == [
+        "Unrelated",
+        "Apache Spark pipelines",
+    ]

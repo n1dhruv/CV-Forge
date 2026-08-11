@@ -279,6 +279,28 @@ async def test_get_embedding_uses_explicit_embedding_configuration(monkeypatch) 
     assert embedding.await_args.kwargs["api_key"] == "embedding-key"
 
 
+async def test_get_embeddings_batches_provider_request(monkeypatch) -> None:
+    user_id = uuid4()
+    settings = UserLLMSettings(
+        user_id=user_id,
+        provider="google",
+        model="gemini-3.6-flash",
+        encrypted_api_key=llm_settings.encrypt("api-key"),
+        embedding_model="gemini-embedding-2",
+    )
+    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
+    monkeypatch.setattr(llm_client.litellm, "get_model_info", lambda model: {"mode": "embedding"})
+    embedding = AsyncMock(
+        return_value=SimpleNamespace(data=[{"embedding": [0.1, 0.2]}, {"embedding": [0.3, 0.4]}])
+    )
+    monkeypatch.setattr(llm_client.litellm, "aembedding", embedding)
+
+    result = await llm_client.get_embeddings(user_id, ["Python APIs", "Apache Kafka"])
+
+    assert result == [[0.1, 0.2], [0.3, 0.4]]
+    assert embedding.await_args.kwargs["input"] == ["Python APIs", "Apache Kafka"]
+
+
 async def test_unsupported_fallback_embedding_model_is_specific(monkeypatch) -> None:
     settings = UserLLMSettings(
         user_id=uuid4(),
