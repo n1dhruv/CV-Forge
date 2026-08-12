@@ -16,6 +16,9 @@ class InvalidBulletSelectionError(Exception):
     pass
 
 
+STABLE_SOURCE_STATUSES = {"assembled", "compiled", "compile_failed"}
+
+
 async def create(session: AsyncSession, user_id: UUID, jd_id: UUID) -> ResumeVersion | None:
     jd = await session.scalar(
         select(JobDescription).where(
@@ -84,6 +87,117 @@ async def fail_enqueue(session: AsyncSession, version: ResumeVersion, job: Backg
     job.status = "failed"
     job.error = "Unable to enqueue rewrite — try again"
     await session.commit()
+
+
+async def queue_assembly(
+    session: AsyncSession, user_id: UUID, version_id: UUID
+) -> tuple[ResumeVersion, BackgroundJob] | None:
+    version = await get_owned(session, user_id, version_id, lock=True)
+    if version is None:
+        return None
+    if version.status != "finalized":
+        raise InvalidResumeVersionStateError
+    job = BackgroundJob(
+        user_id=user_id,
+        job_type="resume_assemble",
+        status="queued",
+        result={"resume_version_id": str(version_id)},
+    )
+    version.status = "assembling"
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    return version, job
+
+
+async def queue_compile(
+    session: AsyncSession, user_id: UUID, version_id: UUID
+) -> tuple[ResumeVersion, BackgroundJob] | None:
+    version = await get_owned(session, user_id, version_id, lock=True)
+    if version is None:
+        return None
+    if version.status not in STABLE_SOURCE_STATUSES or not (version.tex_source or "").strip():
+        raise InvalidResumeVersionStateError
+    previous_status = version.status
+    job = BackgroundJob(
+        user_id=user_id,
+        job_type="resume_compile",
+        status="queued",
+        result={"resume_version_id": str(version_id), "previous_status": previous_status},
+    )
+    version.status = "compiling"
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    return version, job
+
+
+async def fail_operation_enqueue(
+    session: AsyncSession, version: ResumeVersion, job: BackgroundJob, stable_status: str
+) -> None:
+    version.status = stable_status
+    job.status = "failed"
+    job.error = "Unable to enqueue operation — try again"
+    await session.commit()
+
+
+async def update_tex(
+    session: AsyncSession, user_id: UUID, version_id: UUID, tex_source: str
+) -> ResumeVersion | None:
+    version = await get_owned(session, user_id, version_id, lock=True)
+    if version is None:
+        return None
+    if version.status not in STABLE_SOURCE_STATUSES:
+        raise InvalidResumeVersionStateError
+    version.tex_source = tex_source
+    version.pdf_storage_path = None
+    version.status = "assembled"
+    await session.commit()
+    await session.refresh(version)
+    return version
+
+
+async def create_snapshot(
+    session: AsyncSession, user_id: UUID, version_id: UUID
+) -> ResumeVersion | None:
+    version = await get_owned(session, user_id, version_id, lock=True)
+    if version is None:
+        return None
+    if version.status not in STABLE_SOURCE_STATUSES:
+        raise InvalidResumeVersionStateError
+    clone = ResumeVersion(
+        user_id=user_id,
+        jd_id=version.jd_id,
+        tex_source=version.tex_source,
+        pdf_storage_path=version.pdf_storage_path,
+        ats_score=version.ats_score,
+        parent_version_id=version.id,
+        status=version.status,
+    )
+    session.add(clone)
+    await session.commit()
+    await session.refresh(clone)
+    return clone
+
+
+async def history(
+    session: AsyncSession, user_id: UUID, version_id: UUID
+) -> list[ResumeVersion] | None:
+    versions: list[ResumeVersion] = []
+    seen: set[UUID] = set()
+    current_id: UUID | None = version_id
+    while current_id is not None and current_id not in seen:
+        seen.add(current_id)
+        version = await session.scalar(
+            select(ResumeVersion).where(
+                ResumeVersion.id == current_id, ResumeVersion.user_id == user_id
+            )
+        )
+        if version is None:
+            return None if not versions else list(reversed(versions))
+        versions.append(version)
+        current_id = version.parent_version_id
+    return list(reversed(versions))
 
 
 async def list_bullets(

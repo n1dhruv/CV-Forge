@@ -1,0 +1,10 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.65in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{enumitem}
+\pagenumbering{gobble}
+\setlength{\parindent}{0pt}
+\setlist[itemize]{leftmargin=*,nosep}
+\begin{document}
+$sections
+\end{document}
