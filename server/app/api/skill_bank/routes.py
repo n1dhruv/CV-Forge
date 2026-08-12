@@ -34,9 +34,12 @@ async def list_skill_bank_items(
 
 @router.post("/items", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
 async def create_skill_bank_item(
-    payload: ItemCreate, session: Session, current_user: CurrentUser
+    payload: ItemCreate, request: Request, session: Session, current_user: CurrentUser
 ) -> ItemRead:
-    return await skill_bank.create_item(session, current_user, payload)  # type: ignore[return-value]
+    item = await skill_bank.create_item(session, current_user, payload)
+    queue: ArqRedis = request.app.state.arq
+    await embeddings.enqueue_items(session, queue, current_user.id, [item.id])
+    return item  # type: ignore[return-value]
 
 
 async def owned_item_or_404(session: AsyncSession, current_user: CurrentUser, item_id: UUID):
@@ -65,6 +68,7 @@ async def update_skill_bank_item(
     bullet_ids = [bullet.id for bullet in item.bullet_points]
     updated = await skill_bank.update_item(session, item, payload)
     queue: ArqRedis = request.app.state.arq
+    await embeddings.enqueue_items(session, queue, current_user.id, [item.id])
     await embeddings.enqueue_bullets(session, queue, current_user.id, bullet_ids)
     return updated  # type: ignore[return-value]
 

@@ -30,14 +30,17 @@ def _sparse_index() -> Any:
     return _client().Index(name=get_settings().pinecone_sparse_index_name)
 
 
-def _metadata(user_id: UUID, bullet_id: UUID, metadata: dict) -> dict:
-    return {
+def _metadata(user_id: UUID, record_id: UUID, metadata: dict, level: str) -> dict:
+    result = {
         **metadata,
         "user_id": str(user_id),
-        "bullet_id": str(bullet_id),
         "item_id": str(metadata["item_id"]),
+        "level": level,
         "item_type": str(metadata["item_type"]),
     }
+    if level == "bullet":
+        result["bullet_id"] = str(record_id)
+    return result
 
 
 def sparse_embedding(text: str, input_type: Literal["passage", "query"]) -> dict:
@@ -56,15 +59,19 @@ def sparse_embedding(text: str, input_type: Literal["passage", "query"]) -> dict
 
 
 def upsert_dense_vector(
-    user_id: UUID, bullet_id: UUID, embedding: list[float], metadata: dict
+    user_id: UUID,
+    record_id: UUID,
+    embedding: list[float],
+    metadata: dict,
+    level: Literal["bullet", "item"] = "bullet",
 ) -> None:
     try:
         _dense_index().upsert(
             vectors=[
                 {
-                    "id": str(bullet_id),
+                    "id": str(record_id),
                     "values": embedding,
-                    "metadata": _metadata(user_id, bullet_id, metadata),
+                    "metadata": _metadata(user_id, record_id, metadata, level),
                 }
             ],
             namespace=str(user_id),
@@ -74,15 +81,19 @@ def upsert_dense_vector(
 
 
 def upsert_sparse_vector(
-    user_id: UUID, bullet_id: UUID, sparse_values: dict, metadata: dict
+    user_id: UUID,
+    record_id: UUID,
+    sparse_values: dict,
+    metadata: dict,
+    level: Literal["bullet", "item"] = "bullet",
 ) -> None:
     try:
         _sparse_index().upsert(
             vectors=[
                 {
-                    "id": str(bullet_id),
+                    "id": str(record_id),
                     "sparse_values": sparse_values,
-                    "metadata": _metadata(user_id, bullet_id, metadata),
+                    "metadata": _metadata(user_id, record_id, metadata, level),
                 }
             ],
             namespace=str(user_id),
@@ -93,16 +104,22 @@ def upsert_sparse_vector(
 
 def _matches(response: Any) -> list[dict]:
     matches = response.matches if hasattr(response, "matches") else response.get("matches", [])
-    return [
-        {
-            "bullet_id": match.id if hasattr(match, "id") else match["id"],
-            "score": float(match.score if hasattr(match, "score") else match["score"]),
-            "metadata": (
-                match.metadata if hasattr(match, "metadata") else match.get("metadata", {})
-            ),
-        }
-        for match in matches
-    ]
+    results = []
+    for match in matches:
+        record_id = match.id if hasattr(match, "id") else match["id"]
+        metadata = match.metadata if hasattr(match, "metadata") else match.get("metadata", {})
+        level = metadata.get("level", "bullet")
+        results.append(
+            {
+                "id": record_id,
+                "level": level,
+                "bullet_id": record_id if level == "bullet" else None,
+                "item_id": metadata.get("item_id") if level == "item" else None,
+                "score": float(match.score if hasattr(match, "score") else match["score"]),
+                "metadata": metadata,
+            }
+        )
+    return results
 
 
 def query_dense(user_id: UUID, embedding: list[float], top_k: int) -> list[dict]:
@@ -142,7 +159,7 @@ def rerank(query_text: str, candidates: list[dict], top_n: int) -> list[dict]:
             model=get_settings().pinecone_rerank_model,
             query=query_text,
             documents=[
-                {"id": candidate["bullet_id"], "text": candidate["text"]}
+                {"id": candidate["candidate_id"], "text": candidate["text"]}
                 for candidate in candidates
             ],
             top_n=min(top_n, len(candidates)),
@@ -161,19 +178,19 @@ def rerank(query_text: str, candidates: list[dict], top_n: int) -> list[dict]:
         raise VectorStoreError("Pinecone reranker unavailable") from exc
 
 
-def _fetched_ids(index: Any, namespace: str, bullet_ids: list[str]) -> set[str]:
+def _fetched_ids(index: Any, namespace: str, record_ids: list[str]) -> set[str]:
     present: set[str] = set()
-    for start in range(0, len(bullet_ids), FETCH_BATCH_SIZE):
+    for start in range(0, len(record_ids), FETCH_BATCH_SIZE):
         response = index.fetch(
-            ids=bullet_ids[start : start + FETCH_BATCH_SIZE], namespace=namespace
+            ids=record_ids[start : start + FETCH_BATCH_SIZE], namespace=namespace
         )
         vectors = response.vectors if hasattr(response, "vectors") else response.get("vectors", {})
         present.update(str(vector_id) for vector_id in vectors)
     return present
 
 
-def vector_presence(user_id: UUID, bullet_ids: list[UUID]) -> tuple[set[str], set[str]]:
-    ids = [str(bullet_id) for bullet_id in bullet_ids]
+def vector_presence(user_id: UUID, record_ids: list[UUID]) -> tuple[set[str], set[str]]:
+    ids = [str(record_id) for record_id in record_ids]
     try:
         return (
             _fetched_ids(_dense_index(), str(user_id), ids),
@@ -194,6 +211,7 @@ def delete_vectors(user_id: UUID, bullet_id: UUID) -> None:
 def delete_vectors_for_item(user_id: UUID, item_id: UUID) -> None:
     try:
         for index in (_dense_index(), _sparse_index()):
+            index.delete(ids=[str(item_id)], namespace=str(user_id))
             index.delete(
                 filter={"item_id": {"$eq": str(item_id)}},
                 namespace=str(user_id),

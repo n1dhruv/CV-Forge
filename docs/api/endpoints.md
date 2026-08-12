@@ -18,7 +18,7 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/skill_bank/items
 **Auth required:** yes  
-**Description:** Creates a manual Skill Bank item. An empty item has no vector until it has bullets.  
+**Description:** Creates a manual Skill Bank item and queues its item-level embedding, even when it has no bullets.  
 **Request:** JSON item type, title, optional organization/dates/raw text/tags.  
 **Response:** `201` with the created item.  
 **Errors:** `401`; `422` for invalid fields.
@@ -32,14 +32,14 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### PUT /api/skill_bank/items/{item_id}
 **Auth required:** yes  
-**Description:** Updates an owned item and queues fresh embeddings for its existing bullets.  
+**Description:** Updates an owned item and queues its item-level embedding plus fresh embeddings for existing bullets.  
 **Request:** Partial item JSON.  
 **Response:** Updated item.  
 **Errors:** `404`; `422` for invalid fields.
 
 ### DELETE /api/skill_bank/items/{item_id}
 **Auth required:** yes  
-**Description:** Deletes an item, its PostgreSQL bullets, and every Pinecone vector tagged with the item ID in the user's namespace.  
+**Description:** Deletes an item, its PostgreSQL bullets, its own item-ID vectors, and every child vector tagged with the item ID in the user's namespace.  
 **Request:** Item UUID.  
 **Response:** `204`.  
 **Errors:** `404`; external vector-store errors prevent the PostgreSQL delete so stale vectors are not left behind.
@@ -81,10 +81,10 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/settings/llm
 **Auth required:** yes  
-**Description:** Encrypts and saves completion settings plus an optional explicit embedding provider/model/key triplet.  
-**Request:** `provider`, `model`, `api_key`; embedding fields must be supplied together when used.  
+**Description:** Encrypts and saves completion settings plus an optional explicit embedding configuration.  
+**Request:** `provider`, `model`, and `api_key` for initial setup. On later updates, omit either API key to preserve its existing encrypted value. An embedding provider and model must be supplied together; its key is required only when first configuring embeddings.  
 **Response:** Saved provider/model names; never returns keys.  
-**Errors:** `422` for incomplete embedding configuration.
+**Errors:** `422` when an initial API key or a paired embedding provider/model is missing.
 
 ### GET /api/settings/llm
 **Auth required:** yes  
@@ -137,10 +137,10 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/match/{jd_id}
 **Auth required:** yes  
-**Description:** Embeds each owned JD requirement, searches separate dense and sparse Pinecone indexes in the user's namespace, deduplicates the candidates, then ranks their owned PostgreSQL text with Pinecone's hosted reranker.  
+**Description:** Creates and queues an owned background matching job; no embedding, Pinecone query, or reranking runs in the API request.  
 **Request:** JD UUID.  
-**Response:** Grouped items/bullets, rerank-score confidence labels, `pending_embeddings`, and one result per requirement. A requirement with no candidate at or above the calibrated `0.0001` threshold has `no_match=true` and `matched_bullets=[]`.
-**Errors:** `404` foreign/missing JD; `400` missing/unsupported dense embedding configuration; `502` dense provider, Pinecone search, readiness-check, or reranker failure.
+**Response:** `202` with `jd_id` and `background_job_id`. The completed grouped evidence is later stored in `background_jobs.result` and read through `GET /api/background_jobs/{job_id}`.
+**Errors:** `404` for a foreign, missing, or incomplete JD; `503` if Redis/ARQ enqueueing fails. Provider and Pinecone failures appear on the background job instead of this response.
 
 ### GET /api/background_jobs/{job_id}
 **Auth required:** yes  
@@ -172,10 +172,45 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/resume_imports/{resume_import_id}/commit
 **Auth required:** yes  
-**Description:** Writes only the user's final submitted items, bullets, and skills into the Skill Bank with `source=resume_import`, then queues bullet embeddings.  
+**Description:** Writes only the user's final submitted items, bullets, and skills into the Skill Bank with `source=resume_import`, then queues item and bullet embeddings.  
 **Request:** JSON `items` and `skills`; omitted entries are not written, and at least one selection is required.  
 **Response:** Created item details.  
 **Errors:** `404` foreign/missing import; `409` not ready or already committed; `422` invalid fields.
+
+### POST /api/resume_versions
+**Auth required:** yes  
+**Description:** Creates an owned draft resume version for a completed JD. The version has no LaTeX source yet.  
+**Request:** JSON `jd_id`.  
+**Response:** `201` with the version ID, JD ID, and `status=draft`.  
+**Errors:** `404` if the completed JD is missing or belongs to another user.
+
+### POST /api/resume_versions/{version_id}/rewrite
+**Auth required:** yes  
+**Description:** Validates the selected owned bullets, moves the draft to `rewriting`, and queues the safety-checked rewrite job.  
+**Request:** JSON `bullet_point_ids` with 1–50 unique UUIDs.  
+**Response:** `202` with `resume_version_id` and `background_job_id`.  
+**Errors:** `404` for a foreign/missing version or bullet; `409` unless the version is a draft; `503` queue failure.
+
+### GET /api/resume_versions/{version_id}/bullets
+**Auth required:** yes  
+**Description:** Lists the version's original and proposed text, structured guardrail flags, informational `low_effort_rewrite` state, and explicit approval/resolution state.
+**Request:** Version UUID.  
+**Response:** Ordered `resume_bullet_selections`.  
+**Errors:** `404` if the version is not owned/found.
+
+### PUT /api/resume_bullet_selections/{selection_id}
+**Auth required:** yes  
+**Description:** Approves a proposal, saves a user edit, or explicitly reverts to the immutable original text. Edits reset approval until the user approves them.  
+**Request:** One of `approved`, `rewritten_text`, or `revert=true`; revert cannot be combined with another action.  
+**Response:** Updated selection.  
+**Errors:** `404` if not owned/found; `409` after finalization; `422` if an edit changes, adds, or removes a number or metric.
+
+### POST /api/resume_versions/{version_id}/finalize
+**Auth required:** yes  
+**Description:** Moves a reviewing version to `finalized` only after every bullet has been explicitly approved or reverted.  
+**Request:** Version UUID.  
+**Response:** Finalized version.  
+**Errors:** `404` if not owned/found; `409` with the unresolved selection IDs when any decision is missing.
 
 ### POST /api/storage/signed-upload-url
 **Auth required:** yes  

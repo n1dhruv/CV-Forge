@@ -288,13 +288,14 @@ function SettingsForm({
           document.getElementById('chat-model-trigger')?.focus()
           return
         }
-        const values: LLMSettingsInput = { provider: chat.provider, model: chat.model, api_key: apiKey }
-        if (embedding && embeddingApiKey) {
+        const values: LLMSettingsInput = { provider: chat.provider, model: chat.model }
+        if (apiKey.trim()) values.api_key = apiKey.trim()
+        if (embedding) {
           Object.assign(values, {
             embedding_provider: embedding.provider,
             embedding_model: embedding.model,
-            embedding_api_key: embeddingApiKey,
           })
+          if (embeddingApiKey.trim()) values.embedding_api_key = embeddingApiKey.trim()
         }
         onSave(values)
       }}
@@ -323,19 +324,24 @@ function SettingsForm({
             />
             
             <label className="block text-sm font-semibold" htmlFor="api-key">
-              API Key
+              {current ? 'New API Key (optional)' : 'API Key'}
               <input
                 id="api-key"
                 name="api-key"
                 className="field mt-2 bg-canvas font-mono"
                 type="password"
-                required
+                required={!current?.masked_key}
                 autoComplete="new-password"
                 spellCheck={false}
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
                 placeholder={current ? 'Enter a new key to update…' : 'Paste your provider API key…'}
               />
+              {current?.masked_key && (
+                <span className="mt-2 block font-normal text-muted">
+                  Leave blank to keep the current key ({current.masked_key}).
+                </span>
+              )}
             </label>
           </div>
         </section>
@@ -365,19 +371,24 @@ function SettingsForm({
             />
             
             <label className="block text-sm font-semibold" htmlFor="embedding-api-key">
-              Embedding API Key <span className="font-normal text-muted">(required after choosing a model)</span>
+              {current?.masked_embedding_key ? 'New Embedding API Key (optional)' : 'Embedding API Key'}
               <input
                 id="embedding-api-key"
                 name="embedding-api-key"
                 className="field mt-2 bg-canvas font-mono"
                 type="password"
-                required={!!embedding}
+                required={!!embedding && !current?.masked_embedding_key}
                 autoComplete="new-password"
                 spellCheck={false}
                 value={embeddingApiKey}
                 onChange={(event) => setEmbeddingApiKey(event.target.value)}
                 placeholder={current?.masked_embedding_key ? 'Enter a new embedding key to update…' : 'Paste an embedding provider key…'}
               />
+              {current?.masked_embedding_key && (
+                <span className="mt-2 block font-normal text-muted">
+                  Leave blank to keep the current key ({current.masked_embedding_key}).
+                </span>
+              )}
             </label>
             
             {!embedding && (
@@ -405,7 +416,7 @@ function SettingsForm({
         )}
         <button className="button-primary" disabled={pending}>
           <Save size={16} aria-hidden="true" />
-          {pending ? 'Saving…' : 'Save API Keys'}
+          {pending ? 'Saving…' : 'Save Changes'}
         </button>
       </footer>
     </form>

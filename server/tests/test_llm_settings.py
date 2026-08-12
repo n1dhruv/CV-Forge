@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -15,7 +16,6 @@ from app.models.settings import UserLLMSettings
 from app.models.user import User
 from app.schemas.llm_settings import LLMSettingsCreate
 from app.services import llm_client, llm_settings
-from types import SimpleNamespace
 
 
 async def test_saving_settings_encrypts_api_key() -> None:
@@ -34,6 +34,68 @@ async def test_saving_settings_encrypts_api_key() -> None:
     assert saved.encrypted_api_key != "sk-plain"
     assert "sk-plain" not in saved.encrypted_api_key
     session.commit.assert_awaited_once()
+
+
+async def test_updating_one_api_key_preserves_the_other() -> None:
+    old_chat_key = llm_settings.encrypt("old-chat-key")
+    old_embedding_key = llm_settings.encrypt("old-embedding-key")
+    settings = UserLLMSettings(
+        user_id=uuid4(),
+        provider="openai",
+        model="gpt-4o-mini",
+        encrypted_api_key=old_chat_key,
+        embedding_provider="openai",
+        embedding_model="text-embedding-3-small",
+        encrypted_embedding_api_key=old_embedding_key,
+    )
+    session = MagicMock()
+    session.scalar = AsyncMock(return_value=settings)
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    await llm_settings.save_for_user(
+        session,
+        settings.user_id,
+        LLMSettingsCreate(
+            provider="openai",
+            model="gpt-4o-mini",
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            embedding_api_key="new-embedding-key",
+        ),
+    )
+
+    assert settings.encrypted_api_key == old_chat_key
+    assert llm_settings.decrypt(settings.encrypted_embedding_api_key) == "new-embedding-key"
+
+    await llm_settings.save_for_user(
+        session,
+        settings.user_id,
+        LLMSettingsCreate(
+            provider="openai",
+            model="gpt-4o-mini",
+            api_key="new-chat-key",
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+        ),
+    )
+
+    assert llm_settings.decrypt(settings.encrypted_api_key) == "new-chat-key"
+    assert llm_settings.decrypt(settings.encrypted_embedding_api_key) == "new-embedding-key"
+
+
+async def test_initial_settings_require_the_missing_api_key() -> None:
+    session = MagicMock()
+    session.scalar = AsyncMock(return_value=None)
+
+    with pytest.raises(llm_settings.MissingAPIKeyError, match="Chat API key"):
+        await llm_settings.save_for_user(
+            session,
+            uuid4(),
+            LLMSettingsCreate(provider="openai", model="gpt-4o-mini"),
+        )
+
+    session.add.assert_not_called()
 
 
 async def test_read_settings_only_returns_masked_key(monkeypatch: pytest.MonkeyPatch) -> None:

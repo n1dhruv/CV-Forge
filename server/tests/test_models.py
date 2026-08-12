@@ -45,3 +45,7 @@ def test_jd_requirements_store_dynamic_technology_evidence_rules() -> None:
 
     assert "named_technologies" in columns
     assert "technology_match_mode" in columns
+
+
+def test_resume_rewrite_quality_flag_is_persisted() -> None:
+    assert "low_effort_rewrite" in Base.metadata.tables["resume_bullet_selections"].columns
