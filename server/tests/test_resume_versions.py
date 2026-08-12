@@ -223,5 +223,27 @@ async def test_reverting_selection_is_an_explicit_resolution(monkeypatch) -> Non
     assert result.low_effort_rewrite is False
 
 
+async def test_selection_cannot_change_after_review_stage(monkeypatch) -> None:
+    user, version, selection, _ = review_rows()
+    version.status = "assembled"
+    session = AsyncMock()
+    monkeypatch.setattr(
+        resume_versions,
+        "get_selection_owned",
+        AsyncMock(return_value=(selection, version)),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await resume_versions_api.update_resume_bullet(
+            selection.id,
+            ResumeBulletSelectionUpdate(revert=True),
+            session,
+            user,
+        )
+
+    assert error.value.status_code == 409
+    session.commit.assert_not_awaited()
+
+
 def test_rewrite_background_job_type() -> None:
     assert BackgroundJob(job_type="rewrite", status="queued").job_type == "rewrite"

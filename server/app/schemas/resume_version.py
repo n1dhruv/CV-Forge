@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
@@ -8,12 +9,51 @@ class ResumeVersionCreate(BaseModel):
     jd_id: UUID
 
 
+ResumeVersionStatus = Literal[
+    "draft",
+    "rewriting",
+    "reviewing",
+    "finalized",
+    "assembling",
+    "assembled",
+    "compiling",
+    "compiled",
+    "compile_failed",
+]
+
+
 class ResumeVersionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     jd_id: UUID | None
-    status: Literal["draft", "rewriting", "reviewing", "finalized"]
+    status: ResumeVersionStatus
+
+
+class ResumeOperationQueued(BaseModel):
+    resume_version_id: UUID
+    background_job_id: UUID
+
+
+class ResumeTexUpdate(BaseModel):
+    tex_source: str = Field(min_length=1, max_length=500_000)
+
+
+class ResumeVersionDetail(ResumeVersionRead):
+    tex_source: str | None
+    parent_version_id: UUID | None
+    pdf_download_url: str | None = None
+    created_at: datetime
+
+
+class ResumeVersionHistoryItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    parent_version_id: UUID | None
+    status: ResumeVersionStatus
+    created_at: datetime
+    has_pdf: bool
 
 
 class RewriteRequest(BaseModel):

@@ -49,3 +49,14 @@ def test_jd_requirements_store_dynamic_technology_evidence_rules() -> None:
 
 def test_resume_rewrite_quality_flag_is_persisted() -> None:
     assert "low_effort_rewrite" in Base.metadata.tables["resume_bullet_selections"].columns
+
+
+def test_resume_version_metadata_includes_phase_five_statuses() -> None:
+    constraints = " ".join(
+        str(constraint.sqltext)
+        for constraint in Base.metadata.tables["resume_versions"].constraints
+        if hasattr(constraint, "sqltext")
+    )
+
+    assert "assembling" in constraints
+    assert "compile_failed" in constraints

@@ -94,7 +94,8 @@ class ResumeVersion(Base):
     __tablename__ = "resume_versions"
     __table_args__ = (
         CheckConstraint(
-            "status in ('draft','rewriting','reviewing','finalized')",
+            "status in ('draft','rewriting','reviewing','finalized','assembling',"
+            "'assembled','compiling','compiled','compile_failed')",
             name="resume_versions_status_check",
         ),
     )

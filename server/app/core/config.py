@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     github_client_id: str = Field(alias="GITHUB_CLIENT_ID")
     github_client_secret: SecretStr = Field(alias="GITHUB_CLIENT_SECRET")
     tectonic_binary_path: str = Field(alias="TECTONIC_BINARY_PATH")
+    latex_compile_timeout_seconds: int = Field(
+        default=30, alias="LATEX_COMPILE_TIMEOUT_SECONDS", gt=0
+    )
     environment: str = Field(alias="ENVIRONMENT")
 
     @field_validator("encryption_key")
