@@ -2,11 +2,13 @@ from functools import lru_cache
 from typing import Any, Literal
 from uuid import UUID
 
+import httpx
 from pinecone import Pinecone
 
 from app.core.config import get_settings
 
 SPARSE_MODEL = "pinecone-sparse-english-v0"
+OPENROUTER_RERANK_URL = "https://openrouter.ai/api/v1/rerank"
 FETCH_BATCH_SIZE = 1000
 
 
@@ -155,27 +157,34 @@ def rerank(query_text: str, candidates: list[dict], top_n: int) -> list[dict]:
     if not candidates:
         return []
     try:
-        response = _client().inference.rerank(
-            model=get_settings().pinecone_rerank_model,
-            query=query_text,
-            documents=[
-                {"id": candidate["candidate_id"], "text": candidate["text"]}
-                for candidate in candidates
-            ],
-            top_n=min(top_n, len(candidates)),
-            return_documents=False,
-            parameters={"truncate": "END"},
+        settings = get_settings()
+        response = httpx.post(
+            OPENROUTER_RERANK_URL,
+            headers={
+                "Authorization": f"Bearer {settings.openrouter_api_key.get_secret_value()}"
+            },
+            json={
+                "model": settings.openrouter_rerank_model,
+                "query": query_text,
+                "documents": [candidate["text"] for candidate in candidates],
+                "top_n": min(top_n, len(candidates)),
+            },
+            timeout=30,
         )
-        ranked = response.data if hasattr(response, "data") else response["data"]
+        response.raise_for_status()
         return [
             {
-                **candidates[int(item.index if hasattr(item, "index") else item["index"])],
-                "score": float(item.score if hasattr(item, "score") else item["score"]),
+                **candidates[int(item["index"])],
+                "score": float(item["relevance_score"]),
             }
-            for item in ranked
+            for item in response.json()["results"]
         ]
+    except httpx.HTTPStatusError as exc:
+        raise VectorStoreError(
+            f"OpenRouter reranker unavailable ({exc.response.status_code})"
+        ) from exc
     except Exception as exc:
-        raise VectorStoreError("Pinecone reranker unavailable") from exc
+        raise VectorStoreError("OpenRouter reranker unavailable") from exc
 
 
 def _fetched_ids(index: Any, namespace: str, record_ids: list[str]) -> set[str]:

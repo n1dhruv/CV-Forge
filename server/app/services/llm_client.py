@@ -99,7 +99,9 @@ async def get_completion(user_id: UUID, messages: list[dict[str, str]], **kwargs
     return content
 
 
-async def get_embedding(user_id: UUID, text: str) -> list[float]:
+async def get_embeddings(user_id: UUID, texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
     settings = await _settings_for_user(user_id)
     if settings is None:
         raise LLMNotConfiguredError("No LLM provider configured")
@@ -127,7 +129,7 @@ async def get_embedding(user_id: UUID, text: str) -> list[float]:
         response = await litellm.aembedding(
             model=resolved_model,
             api_key=decrypt(encrypted_key),
-            input=text,
+            input=texts,
         )
     except (litellm.AuthenticationError, litellm.PermissionDeniedError):
         raise LLMAuthError("The provider rejected the configured credentials") from None
@@ -147,9 +149,15 @@ async def get_embedding(user_id: UUID, text: str) -> list[float]:
         raise LLMProviderError("The LLM provider could not create an embedding") from None
 
     try:
-        vector = response.data[0]["embedding"]
-    except (AttributeError, IndexError, KeyError, TypeError):
+        vectors = [item["embedding"] for item in response.data]
+    except (AttributeError, KeyError, TypeError):
         raise LLMProviderError("The LLM provider returned an invalid embedding") from None
-    if not isinstance(vector, list) or not vector:
-        raise LLMProviderError("The LLM provider returned an empty embedding")
-    return [float(value) for value in vector]
+    if len(vectors) != len(texts) or any(
+        not isinstance(vector, list) or not vector for vector in vectors
+    ):
+        raise LLMProviderError("The LLM provider returned an invalid embedding")
+    return [[float(value) for value in vector] for vector in vectors]
+
+
+async def get_embedding(user_id: UUID, text: str) -> list[float]:
+    return (await get_embeddings(user_id, [text]))[0]

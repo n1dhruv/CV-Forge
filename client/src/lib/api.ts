@@ -1,7 +1,7 @@
 import type {
   BackgroundJob, BulletPoint, BulletPointInput, JobDescription, JobDescriptionListItem,
   JDParseQueued, LLMSettings, LLMSettingsInput, LLMSettingsSaved, LLMTestResult, SkillBankItem,
-  MatchQueued, ResumeImport, ResumeImportCommit, ResumeImportCommitResult, ResumeImportListItem,
+  MatchResult, ResumeImport, ResumeImportCommit, ResumeImportCommitResult, ResumeImportListItem,
   ResumeImportQueued, SkillBankItemDetail, SkillBankItemInput, SupportedModels,
   ResumeBulletSelection, ResumeBulletSelectionUpdate, ResumeVersion, RewriteQueued,
 } from './types'
@@ -17,6 +17,7 @@ export function createApiClient(getToken: GetToken) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = await getToken()
     const response = await fetch(`${BASE_URL}${path}`, {
+      cache: 'no-store',
       ...init,
       headers: {
         ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
@@ -59,7 +60,7 @@ export function createApiClient(getToken: GetToken) {
       get: (id: string) => request<JobDescription>(`/api/jd/${id}`),
       getStatus: (id: string) => request<BackgroundJob>(`/api/background_jobs/${id}`),
     },
-    match: (jdId: string) => request<MatchQueued>(`/api/match/${jdId}`, { method: 'POST' }),
+    match: (jdId: string) => request<MatchResult>(`/api/match/${jdId}`, { method: 'POST' }),
     resumeVersions: {
       create: (jdId: string) => request<ResumeVersion>('/api/resume_versions', { method: 'POST', body: JSON.stringify({ jd_id: jdId }) }),
       rewrite: (id: string, bulletPointIds: string[]) => request<RewriteQueued>(`/api/resume_versions/${id}/rewrite`, { method: 'POST', body: JSON.stringify({ bullet_point_ids: bulletPointIds }) }),

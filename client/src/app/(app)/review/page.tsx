@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Clock3, Link2, CheckCircle2, LoaderCircle, WandSparkles } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -8,10 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/PageHeader'
 import { ScreenState } from '@/components/ScreenState'
 import { useApi } from '@/hooks/useApi'
-import { useBackgroundJobStatus } from '@/hooks/useBackgroundJobStatus'
-import { Reveal } from '@/components/motion/Reveal'
-import { Stagger, StaggerItem } from '@/components/motion/Stagger'
-import type { MatchResult, MatchedBullet, MatchedItem } from '@/lib/types'
+import type { MatchedBullet, MatchedItem } from '@/lib/types'
 
 const date = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short' })
 const formatDate = (value: string | null) => value ? date.format(new Date(`${value}T00:00:00`)) : 'Present'
@@ -21,35 +18,28 @@ export default function MatchReview() {
   const router = useRouter()
   const params = useSearchParams()
   const jdId = params.get('jd')
-  const jobId = params.get('job')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const startedFor = useRef<string | null>(null)
   const initializedFrom = useRef<string | null>(null)
-  const startMatch = useMutation({
-    mutationFn: () => api.match(jdId!),
-    onSuccess: queued => router.replace(`/review?jd=${jdId}&job=${queued.background_job_id}`),
+  const match = useQuery({
+    queryKey: ['match', jdId],
+    queryFn: () => api.match(jdId!),
+    enabled: !!jdId,
+    retry: false,
   })
-  const job = useBackgroundJobStatus(jobId ?? undefined)
-  const result = job.data?.status === 'done' ? job.data.result : null
+  const result = match.data
   const matchData = result?.jd_id === jdId && Array.isArray(result.items) && Array.isArray(result.requirements)
-    ? result as unknown as MatchResult
+    ? result
     : null
 
   useEffect(() => {
-    if (!jdId || jobId || startedFor.current === jdId) return
-    startedFor.current = jdId
-    startMatch.mutate()
-  }, [jdId, jobId, startMatch])
-
-  useEffect(() => {
-    if (matchData && initializedFrom.current !== jobId) {
+    if (matchData && initializedFrom.current !== jdId) {
       const allIds = matchData.items.flatMap(item =>
         item.bullets.flatMap(bullet => bullet.bullet_point_id ? [bullet.bullet_point_id] : []),
       )
       setSelected(new Set(allIds))
-      initializedFrom.current = jobId
+      initializedFrom.current = jdId
     }
-  }, [jobId, matchData])
+  }, [jdId, matchData])
 
   const startRewrite = useMutation({
     mutationFn: async () => {
@@ -79,10 +69,9 @@ export default function MatchReview() {
     )
   }
 
-  const matching = startMatch.isPending || (!jobId && !startMatch.isError) || job.isPending || job.data?.status === 'queued' || job.data?.status === 'running'
-  const failure = startMatch.error?.message
-    ?? (job.data?.status === 'failed' ? job.data.error || 'The matching worker could not finish.' : null)
-    ?? (job.data?.status === 'done' && !matchData ? 'The matching worker returned an invalid result.' : null)
+  const matching = match.isPending
+  const failure = match.error?.message
+    ?? (match.data && !matchData ? 'The matching API returned an invalid result.' : null)
 
   if (matching) {
     return (
@@ -92,17 +81,14 @@ export default function MatchReview() {
     )
   }
 
-  if (failure || job.isError) {
+  if (failure) {
     return (
       <div className="container-normal py-10 md:py-12">
         <ScreenState
           kind="error"
           title="Match unavailable"
-          detail={failure ?? job.error?.message ?? 'Unable to read the matching job.'}
-          onRetry={() => {
-            startedFor.current = jdId
-            startMatch.mutate()
-          }}
+          detail={failure}
+          onRetry={() => void match.refetch()}
         />
       </div>
     )
@@ -130,14 +116,14 @@ export default function MatchReview() {
         }
       />
 
-      <Reveal delay={0.1}>
+      <>
         {matchData.pending_embeddings ? (
           <div className="mb-10 flex items-start gap-4 rounded-xl border border-warning/30 bg-warning/5 px-6 py-5 shadow-sm" role="status" aria-live="polite">
             <Clock3 className="mt-0.5 shrink-0 text-warning" size={20} aria-hidden="true" />
             <div>
               <p className="font-semibold text-warning-dark">Still processing your skill bank</p>
               <p className="mt-1 text-sm leading-relaxed text-muted max-w-2xl">Some proof points do not have embeddings yet, so this match may be incomplete. Try again shortly.</p>
-              <button className="mt-4 text-sm font-semibold text-warning-dark underline underline-offset-4 hover:text-warning" onClick={() => startMatch.mutate()}>
+              <button className="mt-4 text-sm font-semibold text-warning-dark underline underline-offset-4 hover:text-warning" onClick={() => void match.refetch()}>
                 Check again
               </button>
             </div>
@@ -159,13 +145,9 @@ export default function MatchReview() {
             </div>
             
             <div className="divide-y">
-              <Stagger staggerDelay={0.05}>
-                {matchData.items.map((item, index) => (
-                  <StaggerItem key={item.id}>
-                    <MatchedSource item={item} index={index} selected={selected} onToggle={toggleBullet} />
-                  </StaggerItem>
-                ))}
-              </Stagger>
+              {matchData.items.map((item, index) => (
+                <MatchedSource key={item.id} item={item} index={index} selected={selected} onToggle={toggleBullet} />
+              ))}
             </div>
           </div>
         ) : (
@@ -193,7 +175,7 @@ export default function MatchReview() {
           </section>
         ) : null}
 
-      </Reveal>
+      </>
 
       {selectableCount ? (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-surface/95 shadow-lg backdrop-blur-sm">
