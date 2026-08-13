@@ -1,46 +1,49 @@
+# yaml-language-server: $schema=https://api.app-prg1.zerops.io/api/rest/public/settings/zerops-yml-json-schema.json
+
 zerops:
-    - setup : app
-      build:
-        base: python@3.12
-        deployFiles:
-          - ./server
-        addToRunPrepare:
-          - ./server/requirements.txt
+  - setup: api
+    build:
+      base: python@3.12
+      os: ubuntu
+      deployFiles:
+        - ./server
+      addToRunPrepare:
+        - ./server/requirements.txt
+    run:
+      base: python@3.12
+      os: ubuntu
+      prepareCommands:
+        - python3 -m pip install --ignore-installed -r server/requirements.txt
+      envVariables:
+        REDIS_URL: ${redis_connectionString}
+      start: cd server && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+      ports:
+        - port: 8000
+          httpSupport: true
+      healthCheck:
+        httpGet:
+          port: 8000
+          path: /health
 
-      run :
-        base: python@3.12
-        prepareCommands:
-          - python3 -m pip install --ignore-installed -r server/requirements.txt
-        envVariables:
-          REDIS_URL: ${redis_connectionString}
-        start: cd server && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-          - ports: 8000
-            httpsSupport: true 
-        healthCheck:
-          httpGet:
-            port: 8000
-            path: /health
-
-    - setup : worker
-      build: 
-        base: python@3.12
-        deployFiles:
-          - ./server
-        addToRunPrepare:
-          - ./server/requirements.txt
-
-      run:
-        base: python@3.12
-        prepareCommands:
-          - python3 -m pip install --ignore-installed -r server/requirements.txt
-          - |
-            mkdir -p /home/zerops/bin
-            cd /home/zerops/bin
-            curl --proto '=https' --tlsv1.2 -fsSL https://drop-sh.fullyjustified.net | sh
-            chmod +x tectonic
-
-        envVariables:
-          REDIS_URL: ${redis_connectionString}
-          TECTONIC_BINARY_PATH: /home/zerops/bin/tectonic
-
-        start: cd server && python3 -m arq app.workers.settings.WorkerSettings
+  - setup: worker
+    build:
+      base: python@3.12
+      os: ubuntu
+      deployFiles:
+        - ./server
+      addToRunPrepare:
+        - ./server/requirements.txt
+    run:
+      base: python@3.12
+      os: ubuntu
+      prepareCommands:
+        - python3 -m pip install --ignore-installed -r server/requirements.txt
+        - |
+          mkdir -p /home/zerops/bin
+          cd /home/zerops/bin
+          curl --proto '=https' --tlsv1.2 -fsSL https://drop-sh.fullyjustified.net | sh
+          chmod +x tectonic
+      envVariables:
+        REDIS_URL: ${redis_connectionString}
+        TECTONIC_BINARY_PATH: /home/zerops/bin/tectonic
+      start: cd server && python3 -m arq app.workers.settings.WorkerSettings
