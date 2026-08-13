@@ -40,7 +40,6 @@ def compile_latex(source: str, binary_path: str, timeout_seconds: int) -> bytes:
         source_path.write_text(source, encoding="utf-8")
         command = [
             binary_path,
-            "--only-cached",
             "--untrusted",
             "--keep-logs",
             "--outdir",

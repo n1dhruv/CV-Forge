@@ -55,7 +55,7 @@ def test_parse_diagnostics_skips_warnings_before_error() -> None:
 def test_compile_latex_returns_pdf_bytes(monkeypatch, tmp_path) -> None:
     def run(command, **kwargs):
         assert kwargs["shell"] is False
-        assert "--only-cached" in command
+        assert "--only-cached" not in command
         assert "--untrusted" in command
         assert kwargs["env"]["TECTONIC_UNTRUSTED_MODE"] == "1"
         assert kwargs["env"]["SOURCE_DATE_EPOCH"] == "0"
