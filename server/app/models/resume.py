@@ -111,6 +111,8 @@ class ResumeVersion(Base):
     ats_score: Mapped[Decimal | None] = mapped_column(Numeric)
     parent_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("resume_versions.id"))
     status: Mapped[str] = mapped_column(Text, server_default=sql_text("'draft'"))
+    name: Mapped[str] = mapped_column(Text, default="Resume", server_default=sql_text("'Resume'"))
+    version_label: Mapped[str] = mapped_column(Text, default="Initial", server_default=sql_text("'Initial'"))
     created_at: Mapped[datetime] = mapped_column(server_default=sql_text("now()"))
 
 

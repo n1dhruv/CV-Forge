@@ -72,7 +72,6 @@ async def compile_resume_task(
 def _record_failure(
     version: ResumeVersion, job: BackgroundJob, diagnostic: CompileDiagnostic
 ) -> None:
-    version.pdf_storage_path = None
     version.status = "compile_failed"
     job.status = "failed"
     job.error = "Resume compilation failed"

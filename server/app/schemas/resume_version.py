@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ResumeVersionCreate(BaseModel):
@@ -28,6 +28,29 @@ class ResumeVersionRead(BaseModel):
     id: UUID
     jd_id: UUID | None
     status: ResumeVersionStatus
+    name: str
+    version_label: str
+
+
+class ResumeMetadataUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    version_label: str | None = Field(default=None, max_length=80)
+
+    @field_validator("name", "version_label")
+    @classmethod
+    def trim_nonempty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("value cannot be empty")
+        return value
+
+    @model_validator(mode="after")
+    def has_change(self) -> Self:
+        if self.name is None and self.version_label is None:
+            raise ValueError("provide name or version_label")
+        return self
 
 
 class ResumeOperationQueued(BaseModel):
@@ -54,6 +77,24 @@ class ResumeVersionHistoryItem(BaseModel):
     status: ResumeVersionStatus
     created_at: datetime
     has_pdf: bool
+    name: str
+    version_label: str
+
+
+class ResumeVersionListItem(BaseModel):
+    id: UUID
+    parent_version_id: UUID | None
+    status: ResumeVersionStatus
+    name: str
+    version_label: str
+    created_at: datetime
+    has_pdf: bool
+
+
+class ResumeFamilyRead(BaseModel):
+    id: UUID
+    name: str
+    versions: list[ResumeVersionListItem]
 
 
 class RewriteRequest(BaseModel):

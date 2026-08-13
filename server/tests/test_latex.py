@@ -33,6 +33,7 @@ def test_render_resume_is_deterministic_and_omits_empty_sections() -> None:
     assert r"Cut latency by 20\%" in first
     assert "Experience" in first
     assert "Education" not in first
+    assert r"\n" not in first
 
 
 def test_parse_diagnostics_extracts_line_and_hides_raw_log() -> None:
@@ -41,6 +42,14 @@ def test_parse_diagnostics_extracts_line_and_hides_raw_log() -> None:
     assert diagnostic.kind == "syntax"
     assert diagnostic.line == 42
     assert diagnostic.message == "Missing } inserted"
+
+
+def test_parse_diagnostics_skips_warnings_before_error() -> None:
+    diagnostic = parse_diagnostics(
+        "warning: cached font unavailable\nerror: Font metric missing\nresume.tex:10: stopped"
+    )
+
+    assert diagnostic.message == "Font metric missing"
 
 
 def test_compile_latex_returns_pdf_bytes(monkeypatch, tmp_path) -> None:
@@ -71,6 +80,22 @@ def test_compile_latex_normalizes_timeout(monkeypatch, tmp_path) -> None:
 
     assert error.value.diagnostic.kind == "timeout"
     assert error.value.diagnostic.line is None
+
+
+def test_compile_latex_keeps_error_after_many_warnings(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.services.latex_compiler.TemporaryDirectory", lambda: _Temp(tmp_path))
+    monkeypatch.setattr(
+        "app.services.latex_compiler.subprocess.run",
+        lambda *args, **kwargs: CompletedProcess(
+            args[0], 1, "", "warning: font lookup\n" * 2_000 + "error: Font metric missing\nresume.tex:10: stopped",
+        ),
+    )
+
+    with pytest.raises(CompilationError) as error:
+        compile_latex("source", "tectonic", 30)
+
+    assert error.value.diagnostic.message == "Font metric missing"
+    assert error.value.diagnostic.line == 10
 
 
 class _Temp:

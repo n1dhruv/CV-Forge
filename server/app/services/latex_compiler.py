@@ -22,7 +22,9 @@ class CompilationError(Exception):
 
 def parse_diagnostics(output: str) -> CompileDiagnostic:
     line_match = re.search(r"resume\.tex:(\d+)(?::\d+)?", output)
-    message_match = re.search(r"(?:^|\n)(?:error:\s*)?([^\n]+)", output, re.IGNORECASE)
+    message_match = re.search(r"(?:^|\n)error:\s*([^\n]+)", output, re.IGNORECASE)
+    if message_match is None:
+        message_match = re.search(r"(?:^|\n)(?!warning:)([^\n]+)", output, re.IGNORECASE)
     message = message_match.group(1).strip() if message_match else "LaTeX compilation failed"
     if message.lower().startswith("error:"):
         message = message[6:].strip()
@@ -71,6 +73,6 @@ def compile_latex(source: str, binary_path: str, timeout_seconds: int) -> bytes:
 
         pdf_path = workdir / "resume.pdf"
         if result.returncode or not pdf_path.is_file() or not pdf_path.stat().st_size:
-            output = (result.stderr + "\n" + result.stdout)[:20_000]
+            output = (result.stderr + "\n" + result.stdout)[-20_000:]
             raise CompilationError(parse_diagnostics(output))
         return pdf_path.read_bytes()

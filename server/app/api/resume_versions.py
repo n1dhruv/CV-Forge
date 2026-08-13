@@ -17,6 +17,9 @@ from app.schemas.resume_version import (
     ResumeTexUpdate,
     ResumeVersionDetail,
     ResumeVersionHistoryItem,
+    ResumeFamilyRead,
+    ResumeMetadataUpdate,
+    ResumeVersionListItem,
     ResumeVersionRead,
     RewriteQueued,
     RewriteRequest,
@@ -26,6 +29,30 @@ from app.services.storage import StorageService
 
 router = APIRouter(tags=["resume-versions"])
 Session = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+@router.get("/api/resume_versions", response_model=list[ResumeFamilyRead])
+async def list_resume_families(session: Session, current_user: CurrentUser) -> list[ResumeFamilyRead]:
+    families = await resume_versions.list_families(session, current_user.id)
+    return [
+        ResumeFamilyRead(
+            id=root.id,
+            name=root.name,
+            versions=[
+                ResumeVersionListItem(
+                    id=version.id,
+                    parent_version_id=version.parent_version_id,
+                    status=version.status,
+                    name=version.name,
+                    version_label=version.version_label,
+                    created_at=version.created_at,
+                    has_pdf=bool(version.pdf_storage_path),
+                )
+                for version in versions
+            ],
+        )
+        for root, versions in families
+    ]
 
 
 @router.post(
@@ -98,7 +125,9 @@ async def assemble_resume_version(
         raise HTTPException(status_code=409, detail="Resume version is not finalized") from exc
     if queued is None:
         raise HTTPException(status_code=404, detail="Resume version not found")
-    version, job = queued
+    version, job, created = queued
+    if not created:
+        return ResumeOperationQueued(resume_version_id=version.id, background_job_id=job.id)
     try:
         result = await request.app.state.arq.enqueue_job(
             "assemble_resume_task",
@@ -134,7 +163,9 @@ async def compile_resume_version(
         ) from exc
     if queued is None:
         raise HTTPException(status_code=404, detail="Resume version not found")
-    version, job = queued
+    version, job, created = queued
+    if not created:
+        return ResumeOperationQueued(resume_version_id=version.id, background_job_id=job.id)
     previous_status = str(job.result["previous_status"])
     try:
         result = await request.app.state.arq.enqueue_job(
@@ -197,6 +228,22 @@ async def update_resume_tex(
     return await _version_detail(version, settings)
 
 
+@router.put("/api/resume_versions/{version_id}/metadata", response_model=ResumeVersionDetail)
+async def update_resume_metadata(
+    version_id: UUID,
+    payload: ResumeMetadataUpdate,
+    session: Session,
+    current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ResumeVersionDetail:
+    version = await resume_versions.update_metadata(
+        session, current_user.id, version_id, payload.name, payload.version_label
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="Resume version not found")
+    return await _version_detail(version, settings)
+
+
 @router.post(
     "/api/resume_versions/{version_id}/versions",
     response_model=ResumeVersionDetail,
@@ -234,6 +281,8 @@ async def read_resume_history(
             status=version.status,
             created_at=version.created_at,
             has_pdf=bool(version.pdf_storage_path),
+            name=version.name,
+            version_label=version.version_label,
         )
         for version in versions
     ]
