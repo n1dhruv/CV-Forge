@@ -7,7 +7,8 @@ from app.core.config import Settings
 
 class StorageService:
     def __init__(self, settings: Settings) -> None:
-        self.base_url = f"{settings.supabase_url.rstrip('/')}/storage/v1"
+        self.supabase_url = settings.supabase_url.rstrip("/")
+        self.base_url = f"{self.supabase_url}/storage/v1"
         key = settings.supabase_secret_key.get_secret_value()
         self.headers = {"apikey": key}
         self.bucket = settings.supabase_storage_bucket_resumes
@@ -19,7 +20,7 @@ class StorageService:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{self.base_url}/object/{bucket or self.bucket}/{encoded}",
-                headers={**self.headers, "Content-Type": content_type},
+                headers={**self.headers, "Content-Type": content_type, "x-upsert": "true"},
                 content=content,
             )
             response.raise_for_status()
@@ -55,4 +56,9 @@ class StorageService:
             )
             response.raise_for_status()
         data = response.json()
-        return {"path": path, "signed_url": data["signedURL"], "token": None}
+        signed_url = str(data["signedURL"])
+        if signed_url.startswith("/object/"):
+            signed_url = f"{self.base_url}{signed_url}"
+        elif signed_url.startswith("/"):
+            signed_url = f"{self.supabase_url}{signed_url}"
+        return {"path": path, "signed_url": signed_url, "token": None}

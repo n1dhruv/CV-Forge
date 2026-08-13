@@ -4,6 +4,7 @@ import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen,
   FileInput,
+  Files,
   FileUp,
   LayoutDashboard,
   LogOut,
@@ -30,6 +31,7 @@ const nav = [
   ['/skill-bank', 'Skill bank', BookOpen],
   ['/resume-import', 'Import resume', FileUp],
   ['/job-description', 'Job descriptions', FileInput],
+  ['/resumes', 'Resumes', Files],
   ['/settings', 'Settings', Settings],
 ] as const
 

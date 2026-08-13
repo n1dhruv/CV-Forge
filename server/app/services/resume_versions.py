@@ -19,6 +19,62 @@ class InvalidBulletSelectionError(Exception):
 STABLE_SOURCE_STATUSES = {"assembled", "compiled", "compile_failed"}
 
 
+def _root_id(version: ResumeVersion, by_id: dict[UUID, ResumeVersion]) -> UUID:
+    seen: set[UUID] = set()
+    while version.parent_version_id in by_id and version.id not in seen:
+        seen.add(version.id)
+        version = by_id[version.parent_version_id]
+    return version.id
+
+
+async def list_families(
+    session: AsyncSession, user_id: UUID
+) -> list[tuple[ResumeVersion, list[ResumeVersion]]]:
+    versions = list(
+        (
+            await session.scalars(
+                select(ResumeVersion)
+                .where(ResumeVersion.user_id == user_id)
+                .order_by(ResumeVersion.created_at.desc())
+            )
+        ).all()
+    )
+    by_id = {version.id: version for version in versions}
+    grouped: dict[UUID, list[ResumeVersion]] = {}
+    for version in versions:
+        grouped.setdefault(_root_id(version, by_id), []).append(version)
+    return [
+        (by_id[root_id], sorted(rows, key=lambda row: row.created_at, reverse=True))
+        for root_id, rows in grouped.items()
+    ]
+
+
+async def update_metadata(
+    session: AsyncSession,
+    user_id: UUID,
+    version_id: UUID,
+    name: str | None,
+    version_label: str | None,
+) -> ResumeVersion | None:
+    versions = list(
+        (await session.scalars(select(ResumeVersion).where(ResumeVersion.user_id == user_id))).all()
+    )
+    by_id = {version.id: version for version in versions}
+    version = by_id.get(version_id)
+    if version is None:
+        return None
+    if name is not None:
+        root_id = _root_id(version, by_id)
+        for row in versions:
+            if _root_id(row, by_id) == root_id:
+                row.name = name
+    if version_label is not None:
+        version.version_label = version_label
+    await session.commit()
+    await session.refresh(version)
+    return version
+
+
 async def create(session: AsyncSession, user_id: UUID, jd_id: UUID) -> ResumeVersion | None:
     jd = await session.scalar(
         select(JobDescription).where(
@@ -91,10 +147,23 @@ async def fail_enqueue(session: AsyncSession, version: ResumeVersion, job: Backg
 
 async def queue_assembly(
     session: AsyncSession, user_id: UUID, version_id: UUID
-) -> tuple[ResumeVersion, BackgroundJob] | None:
+) -> tuple[ResumeVersion, BackgroundJob, bool] | None:
     version = await get_owned(session, user_id, version_id, lock=True)
     if version is None:
         return None
+    if version.status == "assembling":
+        job = await session.scalar(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.user_id == user_id,
+                BackgroundJob.job_type == "resume_assemble",
+                BackgroundJob.status.in_(("queued", "running")),
+                BackgroundJob.result["resume_version_id"].astext == str(version_id),
+            )
+            .order_by(BackgroundJob.created_at.desc())
+        )
+        if job is not None:
+            return version, job, False
     if version.status != "finalized":
         raise InvalidResumeVersionStateError
     job = BackgroundJob(
@@ -107,15 +176,28 @@ async def queue_assembly(
     session.add(job)
     await session.commit()
     await session.refresh(job)
-    return version, job
+    return version, job, True
 
 
 async def queue_compile(
     session: AsyncSession, user_id: UUID, version_id: UUID
-) -> tuple[ResumeVersion, BackgroundJob] | None:
+) -> tuple[ResumeVersion, BackgroundJob, bool] | None:
     version = await get_owned(session, user_id, version_id, lock=True)
     if version is None:
         return None
+    if version.status == "compiling":
+        job = await session.scalar(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.user_id == user_id,
+                BackgroundJob.job_type == "resume_compile",
+                BackgroundJob.status.in_(("queued", "running")),
+                BackgroundJob.result["resume_version_id"].astext == str(version_id),
+            )
+            .order_by(BackgroundJob.created_at.desc())
+        )
+        if job is not None:
+            return version, job, False
     if version.status not in STABLE_SOURCE_STATUSES or not (version.tex_source or "").strip():
         raise InvalidResumeVersionStateError
     previous_status = version.status
@@ -129,7 +211,7 @@ async def queue_compile(
     session.add(job)
     await session.commit()
     await session.refresh(job)
-    return version, job
+    return version, job, True
 
 
 async def fail_operation_enqueue(
@@ -173,6 +255,8 @@ async def create_snapshot(
         ats_score=version.ats_score,
         parent_version_id=version.id,
         status=version.status,
+        name=version.name,
+        version_label=f"{version.version_label} Copy"[:80],
     )
     session.add(clone)
     await session.commit()

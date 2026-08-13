@@ -52,7 +52,7 @@ def _render_item(item: LatexItem) -> str:
     if dates:
         heading += rf" \\ {escape_latex(dates)}"
     bullets = "\n".join(rf"  \item {escape_latex(value)}" for value in item.bullets)
-    return rf"\textbf{{{heading}}}\n\begin{{itemize}}\n{bullets}\n\end{{itemize}}"
+    return "\n".join((rf"\textbf{{{heading}}}", r"\begin{itemize}", bullets, r"\end{itemize}"))
 
 
 def render_resume(items: list[LatexItem]) -> str:
@@ -60,5 +60,5 @@ def render_resume(items: list[LatexItem]) -> str:
     for item_type, title in _SECTION_NAMES.items():
         rows = [_render_item(item) for item in items if item.type == item_type]
         if rows:
-            sections.append(rf"\section*{{{title}}}\n" + "\n".join(rows))
+            sections.append(rf"\section*{{{title}}}" + "\n" + "\n".join(rows))
     return Template(_TEMPLATE.read_text()).substitute(sections="\n".join(sections))

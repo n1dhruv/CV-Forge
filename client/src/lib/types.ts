@@ -58,7 +58,8 @@ export interface JDRequirement {
 export interface JobDescription { id: string; status: JobStatus; parsed_json: JDParsed | null; requirements: JDRequirement[]; action_verbs?: string[] | null }
 export interface JobDescriptionListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
 export interface JDParseQueued { job_description_id: string; background_job_id: string }
-export interface BackgroundJob { status: JobStatus; result: Record<string, unknown> | null; error: string | null }
+export interface CompileDiagnostic { kind: string; message: string; line?: number | null }
+export interface BackgroundJob { status: JobStatus; result: ({ errors?: CompileDiagnostic[] } & Record<string, unknown>) | null; error: string | null }
 export interface LLMSettings {
   provider: string
   model: string
@@ -124,9 +125,15 @@ export interface MatchResult {
   requirements: RequirementMatch[]
   items: MatchedItem[]
 }
-export type ResumeVersionStatus = 'draft' | 'rewriting' | 'reviewing' | 'finalized'
-export interface ResumeVersion { id: string; jd_id: string | null; status: ResumeVersionStatus; tex_source: string | null; }
+export type ResumeVersionStatus = 'draft' | 'rewriting' | 'reviewing' | 'finalized' | 'assembling' | 'assembled' | 'compiling' | 'compiled' | 'compile_failed'
+export interface ResumeVersion { id: string; jd_id: string | null; status: ResumeVersionStatus; tex_source: string | null; name: string; version_label: string }
 export interface RewriteQueued { resume_version_id: string; background_job_id: string }
+export interface ResumeOperationQueued { resume_version_id: string; background_job_id: string }
+export interface ResumeVersionDetail extends ResumeVersion { parent_version_id: string | null; pdf_download_url: string | null; created_at: string }
+export interface ResumeVersionHistoryItem { id: string; parent_version_id: string | null; status: ResumeVersionStatus; created_at: string; has_pdf: boolean; name: string; version_label: string }
+export interface ResumeVersionListItem extends ResumeVersionHistoryItem {}
+export interface ResumeFamily { id: string; name: string; versions: ResumeVersionListItem[] }
+export interface ResumeMetadataUpdate { name?: string; version_label?: string }
 export interface GuardrailFlag {
   term: string
   reason: 'number_changed' | 'new_technology' | 'unsupported_claim'
@@ -178,6 +185,7 @@ export interface DemoTag { id: string; name: string; source: 'self_reported' | '
 export interface DemoBullet { id: string; text: string; tags: DemoTag[]; metrics?: string[] }
 export interface DemoSkillBankItem { id: string; type: Exclude<ItemType, 'certification'>; title: string; organization?: string; location?: string; startDate?: string; endDate?: string; description?: string; bullets: DemoBullet[]; skills: DemoTag[] }
 export interface DemoParsedJobDescription { id: string; company: string; role: string; seniority: string; requiredSkills: string[]; niceToHaveSkills: string[]; atsKeywords: string[]; responsibilities: string[]; rawText: string }
+export interface DemoResumeVersion { id: string; name: string; company: string; role: string; updatedAt: string; atsScore: number; texSource: string }
 export interface AsyncJob<T> { id: string; state: JobState; progress: number; stage: string; result?: T; error?: string }
 
 export interface RewriteSuggestion { id: string; section: string; sourceBullet: DemoBullet; tailoredText: string; relevance: number; matchedKeywords: string[]; decision: 'pending' | 'approved' | 'rejected' }

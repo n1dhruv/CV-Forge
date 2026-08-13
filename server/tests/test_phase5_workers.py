@@ -67,7 +67,7 @@ def test_phase5_background_job_types() -> None:
     assert BackgroundJob(job_type="resume_compile", status="queued").job_type == "resume_compile"
 
 
-def test_compile_failure_keeps_source_and_stores_structured_diagnostic() -> None:
+def test_compile_failure_keeps_source_pdf_and_stores_structured_diagnostic() -> None:
     version = ResumeVersion(
         id=uuid4(),
         user_id=uuid4(),
@@ -80,6 +80,6 @@ def test_compile_failure_keeps_source_and_stores_structured_diagnostic() -> None
     _record_failure(version, job, CompileDiagnostic("syntax", "Missing } inserted", 12))
 
     assert version.tex_source == "broken source"
-    assert version.status == "compile_failed" and version.pdf_storage_path is None
+    assert version.status == "compile_failed" and version.pdf_storage_path == "stale.pdf"
     assert job.status == "failed"
     assert job.result["errors"] == [{"kind": "syntax", "message": "Missing } inserted", "line": 12}]
