@@ -7,6 +7,10 @@ export function shouldShowCompileDiagnostics(versionStatus: string | undefined, 
   return versionStatus !== 'compiled' && jobStatus === 'failed'
 }
 
+export function isPostFinalizationStatus(status: string | undefined) {
+  return ['finalized', 'assembling', 'assembled', 'compiling', 'compiled', 'compile_failed'].includes(status ?? '')
+}
+
 export function nextPdfZoom(current: number, direction: -1 | 1) {
   return Math.min(200, Math.max(50, current + direction * 10))
 }

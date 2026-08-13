@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validDiagnosticLine } from './resume-editor.ts'
 import { nextPdfZoom, shouldShowCompileDiagnostics } from './resume-editor.ts'
-import { downloadPdf, resumePdfFilename } from './resume-editor.ts'
+import { downloadPdf, isPostFinalizationStatus, resumePdfFilename } from './resume-editor.ts'
 
 test('diagnostic markers are created only for valid source lines', () => {
   assert.equal(validDiagnosticLine(2, 'first\nsecond'), 2)
@@ -14,6 +14,13 @@ test('diagnostic markers are created only for valid source lines', () => {
 test('old job diagnostics are hidden after the version compiles', () => {
   assert.equal(shouldShowCompileDiagnostics('compiled', 'failed'), false)
   assert.equal(shouldShowCompileDiagnostics('compile_failed', 'failed'), true)
+})
+
+test('every post-finalization status keeps rewrite review read-only', () => {
+  for (const status of ['finalized', 'assembling', 'assembled', 'compiling', 'compiled', 'compile_failed']) {
+    assert.equal(isPostFinalizationStatus(status), true)
+  }
+  assert.equal(isPostFinalizationStatus('reviewing'), false)
 })
 
 test('PDF zoom changes in ten-point steps within its limits', () => {

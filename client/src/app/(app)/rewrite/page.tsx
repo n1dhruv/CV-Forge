@@ -4,12 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, FileText, LoaderCircle, ShieldCheck } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/PageHeader'
 import { RewriteBulletCard } from '@/components/rewrite/RewriteBulletCard'
 import { ScreenState } from '@/components/ScreenState'
 import { useApi } from '@/hooks/useApi'
 import { useBackgroundJobStatus } from '@/hooks/useBackgroundJobStatus'
+import { isPostFinalizationStatus } from '@/lib/resume-editor'
 import type { ResumeBulletSelection, ResumeBulletSelectionUpdate } from '@/lib/types'
 
 export default function RewriteReview() {
@@ -24,6 +25,7 @@ export default function RewriteReview() {
   const [editing, setEditing] = useState<Set<string>>(new Set())
   const [assemblyJobId, setAssemblyJobId] = useState<string>()
   const [compileJobId, setCompileJobId] = useState<string>()
+  const compiledAssemblyJobId = useRef<string | undefined>(undefined)
   const job = useBackgroundJobStatus(jobId)
   const jobDone = !jobId || job.data?.status === 'done'
   const bullets = useQuery({
@@ -68,8 +70,10 @@ export default function RewriteReview() {
   const compileJob = useBackgroundJobStatus(compileJobId)
 
   useEffect(() => {
-    if (assemblyJob.data?.status === 'done' && !compileJobId && !compile.isPending) compile.mutate()
-  }, [assemblyJob.data?.status, compile, compileJobId])
+    if (assemblyJob.data?.status !== 'done' || !assemblyJobId || compiledAssemblyJobId.current === assemblyJobId || compileJobId || compile.isPending) return
+    compiledAssemblyJobId.current = assemblyJobId
+    compile.mutate()
+  }, [assemblyJob.data?.status, assemblyJobId, compile, compileJobId])
 
   useEffect(() => {
     if (!compileJobId || !compileJob.data) return
@@ -108,7 +112,7 @@ export default function RewriteReview() {
   const bulkEligible = unresolved.filter(bullet => bullet.flagged_terms.length === 0)
   const busy = update.isPending || approveAll.isPending || finalize.isPending
   const error = update.error ?? approveAll.error ?? finalize.error
-  const finalized = finalize.data?.status === 'finalized' || version.data?.status === 'finalized'
+  const finalized = isPostFinalizationStatus(finalize.data?.status) || isPostFinalizationStatus(version.data?.status)
 
   return (
     <div className="container-normal py-10 pb-28 md:py-12">
