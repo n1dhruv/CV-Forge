@@ -68,11 +68,14 @@ def test_render_resume_groups_skill_categories_and_omits_empty_itemize() -> None
 
 
 def test_render_resume_keeps_url_semantics_with_tex_safe_targets() -> None:
-    url = "https://example.test/a_b%20c#fragment{value}"
+    url = "https://example.test/a_b%20c?q=$2&next=~^#fragment{value}"
 
     source = render_resume([], LatexProfile("Ada", None, None, None, url, None, None, None))
 
-    assert r"\href{https://example.test/a\_b\%20c\#fragment\%7Bvalue\%7D}" in source
+    assert (
+        r"\href{https://example.test/a\_b\%20c?q=\$2\&next=\%7E\%5E"
+        r"\#fragment\%7Bvalue\%7D}"
+    ) in source
 
 
 def test_parse_diagnostics_extracts_line_and_hides_raw_log() -> None:

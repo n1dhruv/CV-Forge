@@ -359,6 +359,30 @@ async def test_context_too_large_is_a_safe_client_error(monkeypatch) -> None:
     assert "too large" in error.value.detail.lower()
 
 
+async def test_grounding_audit_rejects_an_oversized_complete_prompt(monkeypatch) -> None:
+    context = json.dumps(
+        {
+            "current_resume": {"tex_source": "x" * 79_000},
+            "selected_bullet_evidence": [],
+            "selected_skill_snapshots": [],
+        },
+        separators=(",", ":"),
+    )
+    completion = AsyncMock()
+    monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
+    monkeypatch.setattr(
+        tex_assistant,
+        "PdfReader",
+        lambda _: rendered_pdf("y" * 2_000),
+        raising=False,
+    )
+
+    with pytest.raises(tex_assistant.AssistantContextTooLargeError):
+        await tex_assistant._validate_grounding(uuid4(), b"%PDF-1.4", context)
+
+    completion.assert_not_awaited()
+
+
 async def test_context_uses_account_email_when_contact_email_is_unset() -> None:
     owner = uuid4()
     resume = version(owner)

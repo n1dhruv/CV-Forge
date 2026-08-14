@@ -54,8 +54,9 @@ def escape_latex(value: str) -> str:
 
 
 def _tex_safe_url(value: str) -> str:
-    value = value.replace("\\", "%5C").replace("{", "%7B").replace("}", "%7D")
-    return "".join(rf"\{character}" if character in "%_#" else character for character in value)
+    for character, encoded in (("\\", "%5C"), ("{", "%7B"), ("}", "%7D"), ("~", "%7E"), ("^", "%5E")):
+        value = value.replace(character, encoded)
+    return "".join(rf"\{character}" if character in "%_#&$" else character for character in value)
 
 
 def _date(value: date | None) -> str:

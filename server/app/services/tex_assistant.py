@@ -258,7 +258,7 @@ def _validate_preservation(pdf: bytes, context: str) -> None:
 
 
 def _grounding_prompt(context: str, visible: str) -> str:
-    return f"""Audit the proposed resume against the supplied evidence.
+    prompt = f"""Audit the proposed resume against the supplied evidence.
 
 Supplied evidence:
 {context}
@@ -272,6 +272,9 @@ named technology or tool in the proposed text independently of the first respons
 wording-only changes as new claims.
 
 Return only JSON: {{"unsupported_claims":["exact phrase"],"technology_terms":["tool"]}}"""
+    if len(prompt) > MAX_CONTEXT_CHARACTERS:
+        raise AssistantContextTooLargeError
+    return prompt
 
 
 async def _validate_grounding(user_id: UUID, pdf: bytes, context: str) -> None:
