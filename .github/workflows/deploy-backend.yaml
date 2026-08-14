@@ -1,0 +1,152 @@
+name: Backend CI/CD
+"on":
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: makemyresume-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Python and uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.12"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "server/uv.lock"
+          working-directory: server
+
+      - name: Install backend dependencies
+        working-directory: server
+        run: uv sync --locked
+
+      - name: Run backend tests
+        working-directory: server
+        run: uv run pytest -q
+
+  deploy:
+    name: Deploy backend to Lightsail
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+      LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+      LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+      LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate deployment secrets
+        run: |
+          set -euo pipefail
+
+          test -n "$LIGHTSAIL_HOST"
+          test -n "$LIGHTSAIL_USER"
+          test -n "$LIGHTSAIL_SSH_KEY"
+          test -n "$LIGHTSAIL_KNOWN_HOSTS"
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+
+          install -d -m 700 "$HOME/.ssh"
+
+          printf '%s\n' "$LIGHTSAIL_SSH_KEY" \
+            > "$HOME/.ssh/lightsail-deploy-key"
+
+          printf '%s\n' "$LIGHTSAIL_KNOWN_HOSTS" \
+            > "$HOME/.ssh/known_hosts"
+
+          chmod 600 "$HOME/.ssh/lightsail-deploy-key"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$HOME/.ssh/lightsail-deploy-key" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$LIGHTSAIL_USER@$LIGHTSAIL_HOST" \
+            'bash -se' <<'DEPLOY'
+          set -euo pipefail
+
+          cd /opt/makemyresume/app
+
+          echo "Pulling main branch..."
+          sudo -n -u makemyresume \
+            git pull --ff-only origin main
+
+          echo "Installing backend dependencies..."
+          sudo -n -u makemyresume \
+            /opt/makemyresume/venv/bin/pip install \
+            -r server/requirements.txt
+
+          echo "Running database migrations..."
+          sudo -n systemctl start makemyresume-migrate.service
+
+          migration_result="$(
+            sudo -n systemctl show makemyresume-migrate.service \
+              --property=Result \
+              --value
+          )"
+
+          migration_status="$(
+            sudo -n systemctl show makemyresume-migrate.service \
+              --property=ExecMainStatus \
+              --value
+          )"
+
+          test "$migration_result" = "success"
+          test "$migration_status" = "0"
+
+          echo "Restarting API and worker..."
+          sudo -n systemctl restart \
+            makemyresume-api.service \
+            makemyresume-worker.service
+
+          sudo -n systemctl is-active --quiet \
+            makemyresume-api.service
+
+          sudo -n systemctl is-active --quiet \
+            makemyresume-worker.service
+
+          echo "Waiting for the API health check..."
+          api_healthy=false
+
+          for attempt in $(seq 1 15); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:8000/health \
+              > /dev/null; then
+              api_healthy=true
+              break
+            fi
+
+            sleep 2
+          done
+
+          if [ "$api_healthy" != "true" ]; then
+            echo "The API did not become healthy after deployment."
+            exit 1
+          fi
+
+          echo "Deployment completed successfully."
+          git rev-parse --short HEAD
+          DEPLOY
