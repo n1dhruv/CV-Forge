@@ -148,5 +148,5 @@ jobs:
           fi
 
           echo "Deployment completed successfully."
-          git rev-parse --short HEAD
+          sudo -n -u makemyresume git rev-parse --short HEAD
           DEPLOY
