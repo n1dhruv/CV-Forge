@@ -1,6 +1,6 @@
 # AI pipelines
 
-Before using embeddings, create two serverless Pinecone indexes. The dense index (`resumeforge-bullets`) uses cosine similarity and a dimension matching the configured BYOK embedding model. The sparse index (`resumeforge-bullets-sparse`) uses vector type `sparse`, dot-product similarity, and no fixed dimension. Set `PINECONE_INDEX_NAME`, `PINECONE_HOST`, `PINECONE_SPARSE_INDEX_NAME`, and the shared `PINECONE_API_KEY`. Reranking uses `OPENROUTER_API_KEY` and `OPENROUTER_RERANK_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2:free`.
+Before using embeddings, create two serverless Pinecone indexes. The dense index (`makemyresume-bullets`) uses cosine similarity and a dimension matching the configured BYOK embedding model. The sparse index (`makemyresume-bullets-sparse`) uses vector type `sparse`, dot-product similarity, and no fixed dimension. Set `PINECONE_INDEX_NAME`, `PINECONE_HOST`, `PINECONE_SPARSE_INDEX_NAME`, and the shared `PINECONE_API_KEY`. Reranking uses `OPENROUTER_API_KEY` and `OPENROUTER_RERANK_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2:free`.
 
 Before using resume import, create a **private** bucket named `resume-imports` at **Supabase Dashboard → Storage → New bucket**, and set `SUPABASE_STORAGE_BUCKET_RESUME_IMPORTS=resume-imports`. Storage schema metadata is not written by Alembic.
 

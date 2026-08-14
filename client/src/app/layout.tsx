@@ -24,8 +24,8 @@ const ibmPlexMono = IBM_Plex_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'ResumeForge',
-  description: 'ResumeForge — a precise, evidence-led resume workbench.',
+  title: 'MakeMyResume',
+  description: 'MakeMyResume — a precise, evidence-led resume workbench.',
   icons: {
     icon: '/favicon.svg',
   }

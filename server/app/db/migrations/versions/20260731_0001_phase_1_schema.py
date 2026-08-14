@@ -1,4 +1,4 @@
-"""Create the complete ResumeForge schema."""
+"""Create the complete MakeMyResume schema."""
 
 from alembic import op
 

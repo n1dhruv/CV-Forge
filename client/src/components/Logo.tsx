@@ -17,7 +17,7 @@ export function Logo() {
         R
       </motion.span>
       <span className="font-display text-xl font-semibold tracking-tight">
-        ResumeForge
+        MakeMyResume
       </span>
     </div>
   )
