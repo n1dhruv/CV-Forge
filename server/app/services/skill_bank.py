@@ -41,6 +41,8 @@ async def update_item(
 ) -> SkillBankItem:
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
+    if item.type != "skill":
+        item.skill_category = None
     await session.commit()
     await session.refresh(item)
     return item

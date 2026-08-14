@@ -257,6 +257,7 @@ async def create_snapshot(
         status=version.status,
         name=version.name,
         version_label=f"{version.version_label} Copy"[:80],
+        selected_skills=version.selected_skills,
     )
     session.add(clone)
     await session.commit()

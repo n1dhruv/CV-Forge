@@ -37,6 +37,7 @@ class SkillBankItem(TimestampMixin, Base):
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     raw_text: Mapped[str | None] = mapped_column(Text)
+    skill_category: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sql_text("'{}'::text[]"))
     source: Mapped[str] = mapped_column(Text, server_default=sql_text("'manual'"))
     user: Mapped["User"] = relationship(back_populates="skill_bank_items")

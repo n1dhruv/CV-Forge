@@ -7,7 +7,8 @@ from docx import Document
 from sqlalchemy.dialects import postgresql
 
 from app.models.resume import ResumeImport
-from app.schemas.resume_import import ResumeImportCommit
+from app.models.user import User
+from app.schemas.resume_import import ParsedResumeImport, ResumeImportCommit
 from app.services import llm_client, resume_imports
 from app.workers import resume_imports as worker
 
@@ -90,7 +91,7 @@ async def test_valid_resume_output_matches_schema(monkeypatch) -> None:
 
     assert parsed is not None
     assert parsed.items[0].title == "Tiny API"
-    assert parsed.skills == ["Flask"]
+    assert [(skill.name, skill.category) for skill in parsed.skills] == [("Flask", None)]
     assert completion.await_args.kwargs["response_format"] == {"type": "json_object"}
 
 
@@ -102,14 +103,19 @@ def test_resume_prompt_contains_literal_only_guardrail() -> None:
 
 
 class CommitSession:
-    def __init__(self, resume_import):
+    def __init__(self, resume_import, user=None):
         self.resume_import = resume_import
+        self.user = user
         self.items = []
         self.commit = AsyncMock()
 
     async def scalar(self, statement):
         del statement
         return self.resume_import
+
+    async def get(self, model, user_id):
+        del model, user_id
+        return self.user
 
     def add_all(self, rows):
         self.items = rows
@@ -162,6 +168,25 @@ async def test_commit_creates_selected_skills_as_skill_bank_items() -> None:
     assert all(item.source == "resume_import" for item in items)
 
 
+async def test_commit_keeps_only_nonempty_profile_values_and_skill_categories() -> None:
+    user_id = uuid4()
+    user = User(id=user_id, email="auth@example.com", full_name="Existing", location="Old city")
+    resume_import = ResumeImport(id=uuid4(), user_id=user_id, status="done")
+    session = CommitSession(resume_import, user)
+    payload = ResumeImportCommit.model_validate(
+        {
+            "skills": [{"name": "Python", "category": "Languages"}],
+            "profile": {"full_name": " Ada Lovelace ", "location": " "},
+        }
+    )
+
+    items = await resume_imports.commit_import(session, user_id, resume_import.id, payload)
+
+    assert items is not None and items[0].skill_category == "Languages"
+    assert user.full_name == "Ada Lovelace"
+    assert user.location == "Old city"
+
+
 async def test_double_commit_is_rejected() -> None:
     user_id = uuid4()
     resume_import = ResumeImport(id=uuid4(), user_id=user_id, status="done")
@@ -212,3 +237,31 @@ def test_literal_text_rejoins_pdf_line_wrap_hyphenation() -> None:
     claim = worker._literal_text("role-based authorization")
 
     assert source == claim
+
+
+def test_import_schema_normalizes_legacy_skills_and_preserves_categories() -> None:
+    parsed = ParsedResumeImport.model_validate(
+        {
+            "items": [],
+            "skills": ["Python", {"name": "FastAPI", "category": "Backend"}],
+        }
+    )
+
+    assert [(skill.name, skill.category) for skill in parsed.skills] == [
+        ("Python", None),
+        ("FastAPI", "Backend"),
+    ]
+
+
+def test_import_grounding_checks_profile_values_but_not_skill_categories() -> None:
+    parsed = ParsedResumeImport.model_validate(
+        {
+            "items": [],
+            "skills": [{"name": "Python", "category": "Languages"}],
+            "profile": {"full_name": "Ada Lovelace"},
+        }
+    )
+
+    worker.enforce_literal_content(parsed, "Ada Lovelace uses Python")
+    with pytest.raises(worker.FabricatedResumeContentError):
+        worker.enforce_literal_content(parsed, "Python only")

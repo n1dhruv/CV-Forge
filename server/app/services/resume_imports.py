@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.models.jobs import BackgroundJob
 from app.models.resume import ResumeImport
 from app.models.skill_bank import BulletPoint, SkillBankItem
+from app.models.user import User
 from app.schemas.resume_import import ResumeImportCommit
 
 
@@ -101,11 +102,17 @@ async def commit_import(
             id=uuid4(),
             user_id=user_id,
             type="skill",
-            title=skill,
+            title=skill.name,
+            skill_category=skill.category,
             source="resume_import",
         )
-        for skill in dict.fromkeys(payload.skills)
+        for skill in {skill.name: skill for skill in payload.skills}.values()
     ]
+    if payload.profile and (profile_values := payload.profile.non_empty_values()):
+        user = await session.get(User, user_id)
+        if user is not None:
+            for field, value in profile_values.items():
+                setattr(user, field, value)
     session.add_all(items)
     resume_import.committed_at = datetime.now(timezone.utc)
     await session.commit()

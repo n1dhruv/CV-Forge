@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ItemType = Literal["experience", "project", "skill", "education", "certification"]
 ItemSource = Literal["manual", "resume_import", "github"]
@@ -42,6 +42,18 @@ class ItemCreate(BaseModel):
     end_date: date | None = None
     raw_text: str | None = None
     tags: list[str] = Field(default_factory=list)
+    skill_category: str | None = Field(default=None, max_length=80)
+
+    @field_validator("skill_category", mode="before")
+    @classmethod
+    def normalize_skill_category(cls, value: str | None) -> str | None:
+        return value.strip() or None if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def category_only_for_skills(self) -> "ItemCreate":
+        if self.type != "skill":
+            self.skill_category = None
+        return self
 
 
 class ItemUpdate(BaseModel):
@@ -52,6 +64,12 @@ class ItemUpdate(BaseModel):
     end_date: date | None = None
     raw_text: str | None = None
     tags: list[str] | None = None
+    skill_category: str | None = Field(default=None, max_length=80)
+
+    @field_validator("skill_category", mode="before")
+    @classmethod
+    def normalize_skill_category(cls, value: str | None) -> str | None:
+        return value.strip() or None if isinstance(value, str) else value
 
 
 class ItemRead(BaseModel):
@@ -65,6 +83,7 @@ class ItemRead(BaseModel):
     end_date: date | None
     raw_text: str | None
     tags: list[str]
+    skill_category: str | None
     source: ItemSource
     created_at: datetime
     updated_at: datetime

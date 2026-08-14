@@ -41,10 +41,21 @@ def prompt_for(raw_text: str) -> str:
     "end_date": "YYYY-MM-DD or null",
     "bullets": ["string"]
   }}],
-  "skills": ["string"]
+  "skills": [{{"name": "string", "category": "string or null"}}],
+  "profile": {{
+    "full_name": "string or null",
+    "contact_email": "string or null",
+    "phone": "string or null",
+    "location": "string or null",
+    "linkedin_url": "http(s) URL or null",
+    "github_url": "http(s) URL or null",
+    "leetcode_url": "http(s) URL or null",
+    "portfolio_url": "http(s) URL or null"
+  }}
 }}
 Return only the valid JSON object: no preamble, markdown fences, or commentary.
-CRITICAL: Extract only claims, bullets, and skills literally present in the source text.
+CRITICAL: Extract only claims, bullets, skills, and profile contact values literally present in the source text.
+Skill categories are classification metadata and do not need to appear literally.
 Never infer a skill, invent a metric, embellish a bullet, or add plausible missing content.
 If the source does not explicitly state something, omit it. Use empty arrays when needed.
 
@@ -60,11 +71,13 @@ def _literal_text(value: str) -> str:
 
 def enforce_literal_content(parsed: ParsedResumeImport, raw_text: str) -> None:
     source = _literal_text(raw_text)
-    claims = parsed.skills + [
+    claims = [skill.name for skill in parsed.skills] + [
         claim
         for item in parsed.items
         for claim in ([item.title] + ([item.org] if item.org else []) + item.bullets)
     ]
+    if parsed.profile:
+        claims.extend(parsed.profile.non_empty_values().values())
     fabricated = [claim for claim in claims if _literal_text(claim) not in source]
     if fabricated:
         raise FabricatedResumeContentError

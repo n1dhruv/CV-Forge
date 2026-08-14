@@ -60,3 +60,18 @@ def test_resume_version_metadata_includes_phase_five_statuses() -> None:
 
     assert "assembling" in constraints
     assert "compile_failed" in constraints
+
+
+def test_resume_profile_columns_are_mapped() -> None:
+    assert {
+        "full_name",
+        "contact_email",
+        "phone",
+        "location",
+        "linkedin_url",
+        "github_url",
+        "leetcode_url",
+        "portfolio_url",
+    } <= set(Base.metadata.tables["users"].columns.keys())
+    assert "skill_category" in Base.metadata.tables["skill_bank_items"].columns
+    assert "selected_skills" in Base.metadata.tables["resume_versions"].columns

@@ -103,6 +103,7 @@ async def test_snapshot_sets_parent_and_copies_stable_document(monkeypatch) -> N
         status="compiled",
         tex_source="source",
         pdf_storage_path="resume.pdf",
+        selected_skills=["Python"],
     )
     session = session_mock()
     monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=version))
@@ -111,6 +112,7 @@ async def test_snapshot_sets_parent_and_copies_stable_document(monkeypatch) -> N
 
     assert clone and clone.parent_version_id == version.id
     assert clone.tex_source == "source" and clone.pdf_storage_path == "resume.pdf"
+    assert clone.selected_skills == ["Python"]
     session.add.assert_called_once_with(clone)
 
 
