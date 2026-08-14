@@ -98,6 +98,9 @@ def test_assembly_adds_selected_skill_snapshot_and_mandatory_education() -> None
 
 async def test_assembly_removes_lowest_priority_optional_content_until_one_page(monkeypatch) -> None:
     item = SkillBankItem(id=uuid4(), user_id=uuid4(), type="experience", title="Engineer")
+    education = SkillBankItem(
+        id=uuid4(), user_id=item.user_id, type="education", title="B.Tech Computer Science"
+    )
     first = ResumeBulletSelection(
         id=uuid4(), resume_version_id=uuid4(), bullet_point_id=uuid4(), original_text="Keep me",
         rewritten_text="Keep me", approved=False, resolved=True, flagged_terms=[], section_order=0,
@@ -114,11 +117,26 @@ async def test_assembly_removes_lowest_priority_optional_content_until_one_page(
     )
 
     source = await render_one_page_resume(
-        [(first, item), (second, item)], [], None, None, "tectonic", 30
+        [(first, item), (second, education)], [], education, None, "tectonic", 30
     )
 
     assert "Keep me" in source
     assert "Drop me" not in source
+    assert "Education" in source
+    assert "B.Tech Computer Science" in source
+
+
+async def test_assembly_requires_primary_education(monkeypatch) -> None:
+    monkeypatch.setattr(resume_assembly.asyncio, "to_thread", AsyncMock(return_value=b"pdf"))
+    monkeypatch.setattr(
+        resume_assembly, "PdfReader", lambda _: type("Pdf", (), {"pages": [object()]})()
+    )
+    try:
+        await render_one_page_resume([], [], None, None, "tectonic", 30)
+    except ValueError as error:
+        assert str(error) == "Primary education is required to assemble a resume"
+    else:
+        raise AssertionError("assembly accepted a resume without primary education")
 
 
 def test_phase5_background_job_types() -> None:

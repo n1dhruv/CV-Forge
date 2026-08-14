@@ -37,6 +37,7 @@ def latex_items_from_rows(
         grouped[item.id].bullets.append(
             selection.rewritten_text if selection.approved else selection.original_text
         )
+    mandatory_item = grouped.pop(mandatory_education.id, None) if mandatory_education else None
     items = list(grouped.values())
     items.extend(
         LatexItem(
@@ -54,7 +55,8 @@ def latex_items_from_rows(
     )
     if mandatory_education is not None:
         items.append(
-            LatexItem(
+            mandatory_item
+            or LatexItem(
                 type="education",
                 title=mandatory_education.title,
                 org=mandatory_education.org,
@@ -74,6 +76,8 @@ async def render_one_page_resume(
     tectonic_binary_path: str,
     timeout_seconds: int,
 ) -> str:
+    if mandatory_education is None:
+        raise ValueError("Primary education is required to assemble a resume")
     active_rows = list(rows)
     active_skills = list(selected_skills)
     optional_units = sorted(
@@ -87,13 +91,8 @@ async def render_one_page_resume(
         reverse=True,
     )
     while True:
-        latest_education = mandatory_education
-        if latest_education is not None and any(
-            item.id == latest_education.id for _, item in active_rows
-        ):
-            latest_education = None
         source = render_resume(
-            latex_items_from_rows(active_rows, active_skills, latest_education), profile
+            latex_items_from_rows(active_rows, active_skills, mandatory_education), profile
         )
         pdf = await asyncio.to_thread(
             compile_latex, source, tectonic_binary_path, timeout_seconds, False
