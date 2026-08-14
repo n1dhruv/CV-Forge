@@ -84,7 +84,7 @@ export default function JDInput() {
             </div>
             <h2 className="section-title">AI Provider Required</h2>
             <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-              Add your own LLM provider key before parsing job descriptions. ResumeForge uses your configuration to parse safely and securely.
+              Add your own LLM provider key before parsing job descriptions. MakeMyResume uses your configuration to parse safely and securely.
             </p>
             <Link className="button-primary mt-8" href="/settings">
               Configure AI Provider
@@ -124,7 +124,7 @@ export default function JDInput() {
       <PageHeader
         eyebrow="Target role"
         title="Job Descriptions"
-        description="Provide the source. ResumeForge separates requirements from preferences before it touches your resume."
+        description="Provide the source. MakeMyResume separates requirements from preferences before it touches your resume."
       />
 
       <div className="flex flex-col gap-12 items-center">

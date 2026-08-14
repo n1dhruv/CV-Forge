@@ -84,7 +84,7 @@ export default function Settings() {
       <PageHeader
         eyebrow="Bring your own key"
         title="LLM Settings"
-        description="ResumeForge has no shared AI budget. Your provider bills only your usage, and your saved key is never shown again."
+        description="MakeMyResume has no shared AI budget. Your provider bills only your usage, and your saved key is never shown again."
       />
 
       <Reveal variant="up" delay={0.1}>
@@ -233,7 +233,7 @@ function SavedConfiguration({ title, provider, model, maskedKey, onTest, testPen
           </div>
         ) : (
           <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-4 text-center">
-            <p className="text-sm text-muted">Not configured. ResumeForge will fallback to the chat provider key.</p>
+            <p className="text-sm text-muted">Not configured. MakeMyResume will fallback to the chat provider key.</p>
           </div>
         )}
       </div>

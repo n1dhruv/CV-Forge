@@ -88,7 +88,7 @@ function HomeNav() {
         aria-label="Main navigation"
         className="container-wide flex h-16 items-center justify-between md:h-20"
       >
-        <Link href="/" aria-label="ResumeForge home">
+        <Link href="/" aria-label="MakeMyResume home">
           <Logo />
         </Link>
 
@@ -253,7 +253,7 @@ export default function Home() {
 
               <Reveal variant="up" delay={0.2}>
                 <p className="mt-8 max-w-[52ch] text-lg leading-relaxed text-muted">
-                  ResumeForge turns your real career evidence into focused,
+                  MakeMyResume turns your real career evidence into focused,
                   job-aware resumes — without inventing claims or applying AI
                   edits behind your back.
                 </p>
@@ -284,12 +284,12 @@ export default function Home() {
               <aside
                 className="border border-line bg-surface/60 p-8 backdrop-blur-sm lg:p-10"
                 style={{ borderRadius: 'var(--radius-lg)' }}
-                aria-label="ResumeForge principles"
+                aria-label="MakeMyResume principles"
               >
                 <div className="rounded-lg border bg-canvas p-5 sm:p-7 sm:pl-16 relative">
                   <ShieldCheck size={24} className="absolute left-6 top-7 hidden sm:block text-success/70" aria-hidden="true" />
-                  <p className="font-semibold text-ink">ResumeForge doesn&apos;t connect to any servers but your own database.</p>
-                  <p className="mt-2 text-sm text-muted">All AI processing happens locally in your browser through direct API calls to your chosen provider. Your resume data never passes through a middleman server.</p>
+                  <p className="font-semibold text-ink">MakeMyResume keeps your source evidence under your account.</p>
+                  <p className="mt-2 text-sm text-muted">Supabase secures access while external AI and search services process only the workflows you start.</p>
                 </div>
                 <ul className="mt-8 space-y-5">
                   {principles.map((item, i) => (
@@ -384,7 +384,7 @@ export default function Home() {
                 </Reveal>
                 <Reveal delay={0.1}>
                   <p className="mt-5 max-w-md text-muted">
-                    ResumeForge never invents. It selects from your verified record,
+                    MakeMyResume never invents. It selects from your verified record,
                     then waits for your approval on every change.
                   </p>
                 </Reveal>

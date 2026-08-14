@@ -92,7 +92,7 @@ export function AuthPage({ mode }: AuthPageProps) {
         </Link>
 
         <div className="relative my-auto max-w-md">
-          <p className="eyebrow !text-canvas/50 dark:!text-muted">ResumeForge</p>
+          <p className="eyebrow !text-canvas/50 dark:!text-muted">MakeMyResume</p>
           <h1 className="mt-5 font-display text-5xl font-medium leading-[1.02]">
             One trusted record.
             <br />
@@ -155,8 +155,8 @@ export function AuthPage({ mode }: AuthPageProps) {
               <div className="mb-7 text-center">
                 <h1 className="section-title">
                   {signingIn
-                    ? 'Sign In to ResumeForge'
-                    : 'Create Your ResumeForge Account'}
+                    ? 'Sign In to MakeMyResume'
+                    : 'Create Your MakeMyResume Account'}
                 </h1>
                 <p className="mt-3 text-sm text-muted">
                   {signingIn
@@ -245,7 +245,7 @@ export function AuthPage({ mode }: AuthPageProps) {
               </form>
 
               <p className="mt-7 text-center text-sm text-muted">
-                {signingIn ? 'New to ResumeForge?' : 'Already have an account?'}{' '}
+                {signingIn ? 'New to MakeMyResume?' : 'Already have an account?'}{' '}
                 <Link
                   className="font-semibold text-accent underline underline-offset-4"
                   href={signingIn ? '/sign-up' : '/sign-in'}

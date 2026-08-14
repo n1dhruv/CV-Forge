@@ -633,71 +633,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cv-forge-backend"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "arq" },
-    { name = "asyncpg" },
-    { name = "cryptography" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "litellm" },
-    { name = "pdfplumber" },
-    { name = "pinecone" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "pypdf" },
-    { name = "python-docx" },
-    { name = "python-multipart" },
-    { name = "redis" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "aiosqlite" },
-    { name = "black" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = "==1.16.5" },
-    { name = "arq", specifier = "==0.28.0" },
-    { name = "asyncpg", specifier = "==0.30.0" },
-    { name = "cryptography", specifier = "==50.0.0" },
-    { name = "fastapi", specifier = "==0.116.1" },
-    { name = "httpx", specifier = "==0.28.1" },
-    { name = "litellm", specifier = "==1.95.0" },
-    { name = "pdfplumber", specifier = "==0.11.7" },
-    { name = "pinecone", specifier = "==7.3.0" },
-    { name = "pydantic-settings", specifier = "==2.10.1" },
-    { name = "pyjwt", extras = ["crypto"], specifier = "==2.10.1" },
-    { name = "pypdf", specifier = "==6.1.1" },
-    { name = "python-docx", specifier = "==1.2.0" },
-    { name = "python-multipart", specifier = "==0.0.20" },
-    { name = "redis", specifier = "==5.2.1" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.0.43" },
-    { name = "uvicorn", extras = ["standard"], specifier = "==0.35.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "aiosqlite", specifier = "==0.21.0" },
-    { name = "black", specifier = "==25.1.0" },
-    { name = "pytest", specifier = "==8.4.1" },
-    { name = "pytest-asyncio", specifier = "==1.1.0" },
-    { name = "pytest-cov", specifier = "==6.2.1" },
-    { name = "ruff", specifier = "==0.12.7" },
-]
-
-[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1463,6 +1398,71 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/fb/8ab3845fe046ba4cbf74536bcf6801a774b7caf4350de1c5d37f1f0a9e90/lxml-6.1.1-pp311-pypy311_pp73-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f6f0ce10945fab9c4c06ce14e22af9059d1a87493a9af4501a5b0b9187e21cf2", size = 4250945, upload-time = "2026-05-18T19:20:47.385Z" },
     { url = "https://files.pythonhosted.org/packages/68/1b/7553ab136894374ffae8851ec06f98f511cd8e66246e41b6be059d0a7289/lxml-6.1.1-pp311-pypy311_pp73-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f8844cd288697c6425c9beba919302241e3278871dc6519515e72b04e987abcf", size = 4401664, upload-time = "2026-05-18T19:20:50.489Z" },
     { url = "https://files.pythonhosted.org/packages/db/a4/441aee36c6f6b249823d20fd91f9be9ab89d7c5a8ae542a4a4ca6d342d56/lxml-6.1.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:ed21202aec73cda4d55d1ce57b389aadb90ffb044e6cd1080b8347efe1b1ec84", size = 3508989, upload-time = "2026-05-18T19:18:38.158Z" },
+]
+
+[[package]]
+name = "makemyresume-backend"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "arq" },
+    { name = "asyncpg" },
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "litellm" },
+    { name = "pdfplumber" },
+    { name = "pinecone" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "pypdf" },
+    { name = "python-docx" },
+    { name = "python-multipart" },
+    { name = "redis" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "aiosqlite" },
+    { name = "black" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = "==1.16.5" },
+    { name = "arq", specifier = "==0.28.0" },
+    { name = "asyncpg", specifier = "==0.30.0" },
+    { name = "cryptography", specifier = "==50.0.0" },
+    { name = "fastapi", specifier = "==0.116.1" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "litellm", specifier = "==1.95.0" },
+    { name = "pdfplumber", specifier = "==0.11.7" },
+    { name = "pinecone", specifier = "==7.3.0" },
+    { name = "pydantic-settings", specifier = "==2.10.1" },
+    { name = "pyjwt", extras = ["crypto"], specifier = "==2.10.1" },
+    { name = "pypdf", specifier = "==6.1.1" },
+    { name = "python-docx", specifier = "==1.2.0" },
+    { name = "python-multipart", specifier = "==0.0.20" },
+    { name = "redis", specifier = "==5.2.1" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.0.43" },
+    { name = "uvicorn", extras = ["standard"], specifier = "==0.35.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "aiosqlite", specifier = "==0.21.0" },
+    { name = "black", specifier = "==25.1.0" },
+    { name = "pytest", specifier = "==8.4.1" },
+    { name = "pytest-asyncio", specifier = "==1.1.0" },
+    { name = "pytest-cov", specifier = "==6.2.1" },
+    { name = "ruff", specifier = "==0.12.7" },
 ]
 
 [[package]]

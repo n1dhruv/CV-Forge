@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
-app = FastAPI(title="CV-Forge API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="MakeMyResume API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
