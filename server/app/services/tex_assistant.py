@@ -15,9 +15,22 @@ from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
 from app.schemas.resume_version import AssistantProposal
 from app.services import llm_client
-from app.services.latex_compiler import CompilationError, CompileDiagnostic, compile_latex
+from app.services.latex_compiler import (
+    CompilationError,
+    CompileDiagnostic,
+    compile_latex_async,
+)
+from app.services.rewriter import VerificationOutput, contains_term, number_tokens
 
 MAX_CONTEXT_CHARACTERS = 80_000
+_MANDATORY_CONTEXT_KEYS = (
+    "profile",
+    "current_resume",
+    "selected_bullet_evidence",
+    "selected_skill_snapshots",
+    "primary_education",
+)
+_GROUNDING_EVIDENCE_KEYS = (*_MANDATORY_CONTEXT_KEYS, "remaining_skill_bank")
 
 
 class InvalidAssistantProposalError(Exception):
@@ -27,6 +40,14 @@ class InvalidAssistantProposalError(Exception):
 
 
 class InvalidAssistantPreservationError(Exception):
+    pass
+
+
+class InvalidAssistantGroundingError(Exception):
+    pass
+
+
+class AssistantContextTooLargeError(Exception):
     pass
 
 
@@ -64,48 +85,34 @@ def _remaining_item(item: SkillBankItem) -> dict[str, Any]:
     }
 
 
-def _string_locations(value: Any):
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if isinstance(child, str):
-                yield value, key, child
-            else:
-                yield from _string_locations(child)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            if isinstance(child, str):
-                yield value, index, child
-            else:
-                yield from _string_locations(child)
-
-
-def _shrink(value: Any, overflow: int) -> bool:
-    locations = list(_string_locations(value))
-    if not locations:
-        return False
-    container, key, text = max(locations, key=lambda item: len(item[2]))
-    if not text:
-        return False
-    marker = " [truncated]"
-    target = len(text) - overflow - 64
-    replacement = text[: target - len(marker)] + marker if target > len(marker) else ""
-    if replacement == text:
-        return False
-    container[key] = replacement
-    return True
-
-
 def _capped_json(context: dict[str, Any]) -> str:
+    mandatory = {key: context[key] for key in _MANDATORY_CONTEXT_KEYS if key in context}
+    if len(json.dumps(mandatory, ensure_ascii=False, separators=(",", ":"))) > (
+        MAX_CONTEXT_CHARACTERS
+    ):
+        raise AssistantContextTooLargeError
     while True:
         serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         if len(serialized) <= MAX_CONTEXT_CHARACTERS:
             return serialized
-        remaining = context["remaining_skill_bank"]
-        if remaining:
+        remaining = context.get("remaining_skill_bank")
+        if isinstance(remaining, list) and remaining:
             remaining.pop()
             continue
-        if not _shrink(context, len(serialized) - MAX_CONTEXT_CHARACTERS):
-            return json.dumps({}, separators=(",", ":"))
+        if "remaining_skill_bank" in context:
+            del context["remaining_skill_bank"]
+            continue
+        job_description = context.get("job_description")
+        if isinstance(job_description, dict) and job_description.get("parsed") is not None:
+            job_description["parsed"] = None
+            continue
+        if isinstance(job_description, dict) and job_description.get("raw_text") is not None:
+            job_description["raw_text"] = None
+            continue
+        if "job_description" in context:
+            del context["job_description"]
+            continue
+        raise AssistantContextTooLargeError
 
 
 async def build_context(session: AsyncSession, user_id: UUID, version: ResumeVersion) -> str:
@@ -172,7 +179,9 @@ async def build_context(session: AsyncSession, user_id: UUID, version: ResumeVer
             for selection, _, item in selected_rows
         ],
         "selected_skill_snapshots": [
-            snapshot for snapshot in version.selected_skills or [] if isinstance(snapshot, dict)
+            {"name": snapshot.get("name"), "category": snapshot.get("category")}
+            for snapshot in version.selected_skills or []
+            if isinstance(snapshot, dict)
         ],
         "primary_education": _remaining_item(primary_education) if primary_education else None,
         "remaining_skill_bank": [
@@ -206,6 +215,8 @@ def _diagnostic(error: Exception) -> str:
         line = f" at line {diagnostic.line}" if diagnostic.line is not None else ""
         return f"The proposed TeX failed {diagnostic.kind} validation{line}: {diagnostic.message}"
     if isinstance(error, InvalidAssistantPreservationError):
+        return str(error)
+    if isinstance(error, InvalidAssistantGroundingError):
         return str(error)
     return "The response was not valid JSON with a short message and complete TeX source"
 
@@ -246,6 +257,65 @@ def _validate_preservation(pdf: bytes, context: str) -> None:
             )
 
 
+def _grounding_prompt(context: str, visible: str) -> str:
+    return f"""Audit the proposed resume against the supplied evidence.
+
+Supplied evidence:
+{context}
+
+Proposed visible resume text:
+{visible}
+
+List every factual claim absent from the supplied evidence, including new employers, dates,
+skills, scope, responsibilities, outcomes, and accomplishments. Be conservative. Also list every
+named technology or tool in the proposed text independently of the first response. Do not treat
+wording-only changes as new claims.
+
+Return only JSON: {{"unsupported_claims":["exact phrase"],"technology_terms":["tool"]}}"""
+
+
+async def _validate_grounding(user_id: UUID, pdf: bytes, context: str) -> None:
+    try:
+        facts = json.loads(context)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(facts, dict) or not isinstance(facts.get("current_resume"), dict):
+        return
+    evidence = json.dumps(
+        {key: facts[key] for key in _GROUNDING_EVIDENCE_KEYS if key in facts},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    visible = " ".join(_visible_text(pdf).split())
+    if number_tokens(visible) - number_tokens(evidence):
+        raise InvalidAssistantGroundingError(
+            "The proposed resume introduced a number absent from supplied evidence"
+        )
+    raw = await llm_client.get_completion(
+        user_id,
+        [{"role": "user", "content": _grounding_prompt(evidence, visible)}],
+        response_format={"type": "json_object"},
+        temperature=0,
+    )
+    try:
+        verification = VerificationOutput.model_validate_json(raw)
+    except ValidationError as exc:
+        raise llm_client.LLMProviderError(
+            "The LLM returned an invalid assistant guardrail check"
+        ) from exc
+    if verification.unsupported_claims:
+        raise InvalidAssistantGroundingError(
+            "The proposed resume introduced an unsupported factual claim"
+        )
+    if any(
+        contains_term(visible, term) and not contains_term(evidence, term)
+        for term in verification.technology_terms
+    ):
+        raise InvalidAssistantGroundingError(
+            "The proposed resume introduced a technology absent from supplied evidence"
+        )
+
+
 async def propose(
     user_id: UUID, instruction: str, context: str, settings: Settings
 ) -> AssistantProposal:
@@ -255,15 +325,21 @@ async def propose(
         try:
             raw = await llm_client.get_completion(user_id, messages)
             proposal = AssistantProposal.model_validate_json(raw)
-            pdf = compile_latex(
+            pdf = await compile_latex_async(
                 proposal.tex_source,
                 settings.tectonic_binary_path,
                 settings.latex_compile_timeout_seconds,
                 enforce_one_page=True,
             )
             _validate_preservation(pdf, context)
+            await _validate_grounding(user_id, pdf, context)
             return proposal
-        except (ValidationError, CompilationError, InvalidAssistantPreservationError) as error:
+        except (
+            ValidationError,
+            CompilationError,
+            InvalidAssistantPreservationError,
+            InvalidAssistantGroundingError,
+        ) as error:
             diagnostic = _diagnostic(error)
             if attempt == 0:
                 messages.append(

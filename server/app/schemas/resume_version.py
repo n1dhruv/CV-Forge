@@ -65,6 +65,14 @@ class ResumeTexUpdate(BaseModel):
 class AssistantRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=4_000)
 
+    @field_validator("instruction")
+    @classmethod
+    def trim_instruction(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("instruction cannot be empty")
+        return value
+
 
 class AssistantProposal(BaseModel):
     message: str = Field(min_length=1, max_length=1_000)

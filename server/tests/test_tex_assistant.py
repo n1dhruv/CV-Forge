@@ -56,6 +56,8 @@ def test_assistant_request_requires_a_nonempty_bounded_instruction() -> None:
         AssistantRequest(instruction="")
     with pytest.raises(ValueError):
         AssistantRequest(instruction="x" * 4001)
+    with pytest.raises(ValueError):
+        AssistantRequest(instruction="   ")
 
 
 async def test_context_keeps_current_and_selected_facts_before_capping() -> None:
@@ -149,8 +151,10 @@ async def test_valid_proposal_is_returned_without_persisting_source(monkeypatch)
             return_value=json.dumps({"message": "Tightened projects.", "tex_source": source()})
         ),
     )
-    compiler = MagicMock(return_value=b"%PDF-1.4")
-    monkeypatch.setattr(tex_assistant, "compile_latex", compiler)
+    compiler = AsyncMock(return_value=b"%PDF-1.4")
+    blocking_compiler = MagicMock(return_value=b"%PDF-1.4")
+    monkeypatch.setattr(tex_assistant, "compile_latex_async", compiler, raising=False)
+    monkeypatch.setattr(tex_assistant, "compile_latex", blocking_compiler, raising=False)
 
     proposal = await resume_versions_api.propose_tex(
         resume.id,
@@ -163,8 +167,9 @@ async def test_valid_proposal_is_returned_without_persisting_source(monkeypatch)
     assert proposal.message == "Tightened projects." and proposal.tex_source == source()
     assert resume.tex_source == source() and resume.status == "compiled"
     session.commit.assert_not_awaited()
-    assert compiler.call_args.args[0] == source()
-    assert compiler.call_args.kwargs["enforce_one_page"] is True
+    assert compiler.await_args.args[0] == source()
+    assert compiler.await_args.kwargs["enforce_one_page"] is True
+    blocking_compiler.assert_not_called()
 
 
 async def test_invalid_schema_gets_one_correction_attempt(monkeypatch) -> None:
@@ -175,7 +180,9 @@ async def test_invalid_schema_gets_one_correction_attempt(monkeypatch) -> None:
         side_effect=["not json", json.dumps({"message": "Fixed.", "tex_source": source()})]
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
-    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant, "compile_latex_async", AsyncMock(return_value=b"%PDF-1.4")
+    )
 
     result = await resume_versions_api.propose_tex(
         resume.id,
@@ -200,14 +207,14 @@ async def test_compile_failure_gets_one_diagnostic_correction_attempt(monkeypatc
             json.dumps({"message": "Fixed.", "tex_source": source()}),
         ]
     )
-    compiler = MagicMock(
+    compiler = AsyncMock(
         side_effect=[
             CompilationError(CompileDiagnostic("syntax", "Undefined control sequence", 4)),
             b"%PDF-1.4",
         ]
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
-    monkeypatch.setattr(tex_assistant, "compile_latex", compiler)
+    monkeypatch.setattr(tex_assistant, "compile_latex_async", compiler)
     result = await resume_versions_api.propose_tex(
         resume.id,
         request(),
@@ -233,8 +240,8 @@ async def test_two_multi_page_proposals_are_rejected_without_writes(monkeypatch)
     )
     monkeypatch.setattr(
         tex_assistant,
-        "compile_latex",
-        MagicMock(
+        "compile_latex_async",
+        AsyncMock(
             side_effect=CompilationError(
                 CompileDiagnostic("layout", "Resume must fit exactly one page")
             )
@@ -292,8 +299,20 @@ def test_context_cap_drops_remaining_evidence_before_current_or_selected_facts()
     assert "REMAINING-" not in capped
 
 
-def test_context_cap_makes_no_progress_for_empty_strings() -> None:
-    assert tex_assistant._shrink({"text": ""}, 1) is False
+def test_context_cap_drops_job_description_before_mandatory_facts() -> None:
+    current = "CURRENT-" + "x" * 70_000
+    selected = "SELECTED-" + "y" * 1_000
+    context = {
+        "current_resume": {"tex_source": current},
+        "selected_bullet_evidence": [{"original_text": selected}],
+        "job_description": {"raw_text": "JD-" + "z" * 20_000, "parsed": None},
+        "remaining_skill_bank": [],
+    }
+
+    capped = tex_assistant._capped_json(context)
+
+    assert current in capped and selected in capped
+    assert "JD-" not in capped
 
 
 def test_pathological_structural_context_over_cap_terminates() -> None:
@@ -303,7 +322,41 @@ def test_pathological_structural_context_over_cap_terminates() -> None:
         "remaining_skill_bank": [],
     }
 
-    assert tex_assistant._capped_json(context) == "{}"
+    with pytest.raises(tex_assistant.AssistantContextTooLargeError):
+        tex_assistant._capped_json(context)
+
+
+def test_mandatory_context_over_cap_is_rejected_instead_of_truncated() -> None:
+    context = {
+        "current_resume": {"tex_source": "CURRENT-" + "x" * 80_000},
+        "selected_bullet_evidence": [{"original_text": "SELECTED"}],
+        "remaining_skill_bank": [],
+    }
+
+    with pytest.raises(tex_assistant.AssistantContextTooLargeError):
+        tex_assistant._capped_json(context)
+
+
+async def test_context_too_large_is_a_safe_client_error(monkeypatch) -> None:
+    resume = version()
+    monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=resume))
+    monkeypatch.setattr(
+        tex_assistant,
+        "build_context",
+        AsyncMock(side_effect=tex_assistant.AssistantContextTooLargeError()),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await resume_versions_api.propose_tex(
+            resume.id,
+            request(),
+            MagicMock(),
+            type("User", (), {"id": resume.user_id})(),
+            MagicMock(),
+        )
+
+    assert error.value.status_code == 422
+    assert "too large" in error.value.detail.lower()
 
 
 async def test_context_uses_account_email_when_contact_email_is_unset() -> None:
@@ -339,6 +392,81 @@ async def test_context_uses_the_same_primary_education_ordering_as_assembly() ->
     assert "skill_bank_items.start_date DESC NULLS LAST" in sql
     assert "skill_bank_items.created_at DESC" in sql
     assert context["primary_education"]["title"] == "BSc Computer Science"
+
+
+@pytest.mark.parametrize(
+    ("visible", "verification", "diagnostic"),
+    [
+        (
+            "Built Python APIs at Acme in 2024, improving uptime by 99%",
+            {"unsupported_claims": [], "technology_terms": ["Python"]},
+            "number",
+        ),
+        (
+            "Built Python APIs at Acme in 2025, improving uptime by 20%",
+            {"unsupported_claims": [], "technology_terms": ["Python"]},
+            "number",
+        ),
+        (
+            "Built Python APIs at Acme for 5 years, improving uptime by 20%",
+            {"unsupported_claims": [], "technology_terms": ["Python"]},
+            "number",
+        ),
+        (
+            "Built Python APIs at Globex in 2024, improving uptime by 20%",
+            {"unsupported_claims": ["Globex"], "technology_terms": ["Python"]},
+            "unsupported",
+        ),
+        (
+            "Built Python and Rust APIs at Acme in 2024, improving uptime by 20%",
+            {"unsupported_claims": [], "technology_terms": ["Python", "Rust"]},
+            "technology",
+        ),
+        (
+            "Built Python APIs at Acme in 2024, doubling revenue and improving uptime by 20%",
+            {"unsupported_claims": ["doubling revenue"], "technology_terms": ["Python"]},
+            "unsupported",
+        ),
+    ],
+)
+async def test_new_protected_facts_are_rejected_after_one_correction(
+    monkeypatch, visible, verification, diagnostic
+) -> None:
+    context = json.dumps(
+        {
+            "current_resume": {
+                "tex_source": "Built Python APIs at Acme in 2024, improving uptime by 20%"
+            },
+            "job_description": {"raw_text": "Seeking Rust expertise and 5 years experience"},
+            "selected_bullet_evidence": [],
+            "selected_skill_snapshots": [{"name": "Python"}],
+        }
+    )
+    proposal = json.dumps({"message": "Updated.", "tex_source": source()})
+
+    async def completion(user_id, messages, **kwargs):
+        del user_id, kwargs
+        if "Audit the proposed resume" in messages[-1]["content"]:
+            return json.dumps(verification)
+        return proposal
+
+    monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
+    monkeypatch.setattr(
+        tex_assistant, "compile_latex_async", AsyncMock(return_value=b"%PDF-1.4"), raising=False
+    )
+    monkeypatch.setattr(
+        tex_assistant, "PdfReader", lambda _: rendered_pdf(visible), raising=False
+    )
+
+    with pytest.raises(tex_assistant.InvalidAssistantProposalError) as error:
+        await tex_assistant.propose(
+            uuid4(),
+            request().instruction,
+            context,
+            MagicMock(tectonic_binary_path="tectonic", latex_compile_timeout_seconds=30),
+        )
+
+    assert diagnostic in error.value.diagnostic.lower()
 
 
 def preservation_context() -> str:
@@ -382,7 +510,9 @@ async def test_missing_required_header_or_education_retries_then_returns_422(
         return_value=json.dumps({"message": "Missing required content.", "tex_source": missing})
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
-    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant, "compile_latex_async", AsyncMock(return_value=b"%PDF-1.4")
+    )
     monkeypatch.setattr(
         tex_assistant, "PdfReader", lambda _: rendered_pdf("missing"), raising=False
     )
@@ -407,7 +537,9 @@ async def test_proposal_preserving_required_header_and_education_passes(monkeypa
         )
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
-    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant, "compile_latex_async", AsyncMock(return_value=b"%PDF-1.4")
+    )
     monkeypatch.setattr(
         tex_assistant,
         "PdfReader",
@@ -440,7 +572,9 @@ async def test_comment_or_post_document_preservation_is_rejected(
         return_value=json.dumps({"message": "Hidden required facts.", "tex_source": hidden_source})
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
-    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant, "compile_latex_async", AsyncMock(return_value=b"%PDF-1.4")
+    )
     monkeypatch.setattr(
         tex_assistant, "PdfReader", lambda _: rendered_pdf("visible only"), raising=False
     )

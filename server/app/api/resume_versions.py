@@ -246,9 +246,11 @@ async def propose_tex(
         raise HTTPException(status_code=404, detail="Resume version not found")
     if version.status not in resume_versions.STABLE_SOURCE_STATUSES or not version.tex_source:
         raise HTTPException(status_code=409, detail="Resume source is not ready for assistance")
-    context = await tex_assistant.build_context(session, current_user.id, version)
     try:
+        context = await tex_assistant.build_context(session, current_user.id, version)
         return await tex_assistant.propose(current_user.id, payload.instruction, context, settings)
+    except tex_assistant.AssistantContextTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="Resume context is too large for assistance") from exc
     except llm_client.LLMNotConfiguredError as exc:
         raise HTTPException(status_code=422, detail="No LLM provider configured") from exc
     except llm_client.LLMError as exc:

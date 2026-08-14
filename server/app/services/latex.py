@@ -53,6 +53,11 @@ def escape_latex(value: str) -> str:
     return "".join(_ESCAPES.get(character, character) for character in value)
 
 
+def _tex_safe_url(value: str) -> str:
+    value = value.replace("\\", "%5C").replace("{", "%7B").replace("}", "%7D")
+    return "".join(rf"\{character}" if character in "%_#" else character for character in value)
+
+
 def _date(value: date | None) -> str:
     return value.strftime("%b %Y") if value else ""
 
@@ -96,7 +101,7 @@ def _render_header(profile: LatexProfile | None) -> str:
         if value
     ]
     contacts.extend(
-        rf"\href{{\detokenize{{{value}}}}}{{{escape_latex(value)}}}"
+        rf"\href{{{_tex_safe_url(value)}}}{{{escape_latex(value)}}}"
         for value in (
             profile.linkedin_url,
             profile.github_url,

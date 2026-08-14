@@ -266,7 +266,6 @@ async def update_tex(
     if version.status not in STABLE_SOURCE_STATUSES:
         raise InvalidResumeVersionStateError
     version.tex_source = tex_source
-    version.pdf_storage_path = None
     version.status = "assembled"
     await session.commit()
     await session.refresh(version)

@@ -7,9 +7,12 @@ import httpx
 from fastapi import HTTPException
 
 from app.api import resume_versions as resume_versions_api
+from app.models.jobs import BackgroundJob
 from app.models.resume import ResumeVersion
 from app.schemas.resume_version import ResumeMetadataUpdate, RewriteRequest
 from app.services import resume_versions
+from app.services.latex_compiler import CompileDiagnostic
+from app.workers.resume_compile import _record_failure
 
 
 def session_mock() -> MagicMock:
@@ -97,7 +100,7 @@ async def test_queue_compile_accepts_stable_source_states(monkeypatch, status) -
     assert queued[1].result["previous_status"] == status
 
 
-async def test_source_update_invalidates_pdf_without_creating_a_row(monkeypatch) -> None:
+async def test_source_update_and_failed_compile_keep_previous_pdf(monkeypatch) -> None:
     version = ResumeVersion(
         id=uuid4(), user_id=uuid4(), status="compiled", tex_source="old", pdf_storage_path="x.pdf"
     )
@@ -110,9 +113,14 @@ async def test_source_update_invalidates_pdf_without_creating_a_row(monkeypatch)
     assert (version.tex_source, version.status, version.pdf_storage_path) == (
         "new",
         "assembled",
-        None,
+        "x.pdf",
     )
     session.add.assert_not_called()
+
+    job = BackgroundJob(id=uuid4(), user_id=version.user_id, status="running")
+    _record_failure(version, job, CompileDiagnostic("syntax", "Missing }", 3))
+
+    assert version.pdf_storage_path == "x.pdf"
 
 
 async def test_snapshot_sets_parent_and_copies_stable_document(monkeypatch) -> None:
