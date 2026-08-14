@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assistantProposalIsStale, orderedSelections, profileLinkError } from './task4.ts'
-import type { MatchedItem } from './types.ts'
+import { assistantProposalIsStale, assistantUndoIsAvailable, orderedSelections, profileLinkError } from './task4.ts'
+import type { MatchedItem, MatchedRequirement, RequirementMatch } from './types.ts'
+
+type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends (<Value>() => Value extends Right ? 1 : 2) ? true : false
+type Expect<Value extends true> = Value
+type _MatchedImportanceIsExact = Expect<Equal<MatchedRequirement['importance'], 'required' | 'nice_to_have'>>
+type _RequirementImportanceIsExact = Expect<Equal<RequirementMatch['importance'], 'required' | 'nice_to_have'>>
+
+const requirement: MatchedRequirement = {
+  id: 'requirement-1',
+  text: 'Python',
+  importance: 'required',
+  score: 0.9,
+  confidence: 'strong',
+  technology_evidence: ['Python'],
+}
 
 const items: MatchedItem[] = [
   {
@@ -19,7 +33,7 @@ const items: MatchedItem[] = [
         score: 0.9,
         confidence: 'strong',
         recommended: true,
-        requirements: [],
+        requirements: [requirement],
       },
       {
         bullet_point_id: null,
@@ -28,7 +42,7 @@ const items: MatchedItem[] = [
         score: 0.7,
         confidence: 'moderate',
         recommended: false,
-        requirements: [],
+        requirements: [requirement],
       },
       {
         bullet_point_id: 'bullet-2',
@@ -37,7 +51,7 @@ const items: MatchedItem[] = [
         score: 0.8,
         confidence: 'moderate',
         recommended: true,
-        requirements: [],
+        requirements: [requirement],
       },
     ],
   },
@@ -73,4 +87,24 @@ test('profile links use the same http and https boundary as the server', () => {
 test('assistant proposals become stale when the editor changes from the captured source', () => {
   assert.equal(assistantProposalIsStale('before', 'before'), false)
   assert.equal(assistantProposalIsStale('before', 'edited while pending'), true)
+})
+
+test('assistant undo is available only while the applied buffer is unchanged', () => {
+  assert.equal(assistantUndoIsAvailable('assistant output', 'assistant output'), true)
+  assert.equal(assistantUndoIsAvailable('assistant output', 'manual edit after apply'), false)
+  assert.equal(assistantUndoIsAvailable(undefined, 'assistant output'), false)
+})
+
+test('match importance fixtures preserve the server literals', () => {
+  const topLevel: RequirementMatch = {
+    id: 'requirement-1',
+    text: 'Python',
+    importance: 'nice_to_have',
+    named_technologies: ['Python'],
+    technology_match_mode: 'any',
+    technology_evidence: ['Python'],
+    no_match: false,
+  }
+  assert.equal(requirement.importance, 'required')
+  assert.equal(topLevel.importance, 'nice_to_have')
 })

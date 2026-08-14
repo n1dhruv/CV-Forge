@@ -77,7 +77,7 @@ export default function ProfilePage() {
     <div className="container-normal py-10 md:py-12">
       <PageHeader eyebrow="Resume identity" title="Profile" description="These contact details can appear in tailored resumes. Only fields you save here are used." />
       <form className="max-w-3xl" onSubmit={submit}>
-        <div className="grid gap-6 rounded-xl border bg-surface p-6 shadow-sm sm:grid-cols-2 sm:p-8">
+        <fieldset className="grid gap-6 rounded-xl border bg-surface p-6 shadow-sm sm:grid-cols-2 sm:p-8" disabled={save.isPending}>
           {fields.map(field => {
             const error = linkErrors[field.name]
             return (
@@ -98,7 +98,7 @@ export default function ProfilePage() {
               </label>
             )
           })}
-        </div>
+        </fieldset>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
           <p className={`text-sm ${save.isError ? 'text-danger' : 'text-muted'}`} role={save.isError ? 'alert' : 'status'} aria-live="polite">

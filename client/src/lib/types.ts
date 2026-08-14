@@ -22,13 +22,14 @@ export interface SkillBankItem {
   end_date: string | null
   raw_text: string | null
   tags: string[]
+  skill_category: string | null
   source?: 'manual' | 'resume_import' | 'github'
   created_at: string
   updated_at: string
 }
 
 export interface SkillBankItemDetail extends SkillBankItem { bullet_points: BulletPoint[] }
-export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags'>>
+export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags' | 'skill_category'>>
 export type BulletPointInput = Pick<BulletPoint, 'text'> & Partial<Pick<BulletPoint, 'tags' | 'metrics' | 'display_order'>>
 
 export interface JDTechnologyRequirement {
@@ -89,6 +90,7 @@ export type MatchConfidence = 'strong' | 'moderate'
 export interface MatchedRequirement {
   id: string
   text: string
+  importance: 'required' | 'nice_to_have'
   score: number
   confidence: MatchConfidence
   technology_evidence: string[]
@@ -114,7 +116,7 @@ export interface MatchedItem {
 export interface RequirementMatch {
   id: string
   text: string
-  importance: string
+  importance: 'required' | 'nice_to_have'
   named_technologies: string[]
   technology_match_mode: 'any' | 'all' | null
   technology_evidence: string[]

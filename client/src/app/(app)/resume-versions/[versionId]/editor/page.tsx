@@ -12,7 +12,7 @@ import { useApi } from '@/hooks/useApi'
 import { useBackgroundJobStatus } from '@/hooks/useBackgroundJobStatus'
 import { useUI } from '@/store/ui'
 import { downloadPdf, shouldShowCompileDiagnostics, validDiagnosticLine } from '@/lib/resume-editor'
-import { assistantProposalIsStale } from '@/lib/task4'
+import { assistantProposalIsStale, assistantUndoIsAvailable } from '@/lib/task4'
 import type { AssistantProposal, CompileDiagnostic, ResumeMetadataUpdate } from '@/lib/types'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
@@ -43,7 +43,7 @@ export default function ResumeEditorPage() {
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [assistantInstruction, setAssistantInstruction] = useState('')
   const [assistantProposal, setAssistantProposal] = useState<(AssistantProposal & { baseSource: string }) | null>(null)
-  const [assistantUndo, setAssistantUndo] = useState<string>()
+  const [assistantUndo, setAssistantUndo] = useState<{ previousSource: string; appliedSource: string }>()
   const [assistantApplied, setAssistantApplied] = useState(false)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null)
@@ -260,14 +260,14 @@ export default function ResumeEditorPage() {
   }
   const applyAssistantProposal = () => {
     if (!assistantProposal || assistantProposalIsStale(assistantProposal.baseSource, source)) return
-    setAssistantUndo(source)
+    setAssistantUndo({ previousSource: source, appliedSource: assistantProposal.tex_source })
     setSource(assistantProposal.tex_source)
     setAssistantProposal(null)
     setAssistantApplied(true)
   }
   const undoAssistantProposal = () => {
-    if (assistantUndo === undefined) return
-    setSource(assistantUndo)
+    if (!assistantUndoIsAvailable(assistantUndo?.appliedSource, source) || !assistantUndo) return
+    setSource(assistantUndo.previousSource)
     setAssistantUndo(undefined)
     setAssistantApplied(false)
   }
@@ -373,7 +373,7 @@ export default function ResumeEditorPage() {
         proposal={assistantProposal}
         stale={!!assistantProposal && assistantProposalIsStale(assistantProposal.baseSource, source)}
         applied={assistantApplied}
-        undoAvailable={assistantUndo !== undefined}
+        undoAvailable={assistantUndoIsAvailable(assistantUndo?.appliedSource, source)}
         theme={theme}
         disabled={busy}
         onToggle={() => setAssistantOpen(current => !current)}

@@ -32,3 +32,7 @@ export function profileLinkError(value: string) {
 export function assistantProposalIsStale(capturedSource: string, currentSource: string) {
   return capturedSource !== currentSource
 }
+
+export function assistantUndoIsAvailable(appliedSource: string | undefined, currentSource: string) {
+  return appliedSource !== undefined && appliedSource === currentSource
+}

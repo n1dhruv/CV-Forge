@@ -76,8 +76,8 @@ export function AssistantDock(props: AssistantDockProps) {
                 </div>
               </div>
               {props.stale ? <p className="border-y bg-warning/10 px-4 py-2 text-sm font-medium text-ink md:px-5" role="alert">The source changed while this proposal was pending. Discard it and request a new proposal.</p> : null}
-              <div className="h-64 min-h-52" aria-label="Proposed source comparison">
-                <DiffEditor original={props.proposal.baseSource} modified={props.proposal.tex_source} language="latex" theme={props.theme === 'dark' ? 'vs-dark' : 'vs'} options={{ automaticLayout: true, fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, lineHeight: 20, minimap: { enabled: false }, readOnly: true, renderSideBySide: true, scrollBeyondLastLine: false, wordWrap: 'on' }} />
+              <div className="h-64 min-h-52" role="region" aria-label="Proposed source comparison">
+                <DiffEditor original={props.proposal.baseSource} modified={props.proposal.tex_source} originalModelPath="inmemory://resume-assistant/original.tex" modifiedModelPath="inmemory://resume-assistant/proposed.tex" keepCurrentOriginalModel keepCurrentModifiedModel language="latex" theme={props.theme === 'dark' ? 'vs-dark' : 'vs'} options={{ automaticLayout: true, fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, lineHeight: 20, minimap: { enabled: false }, readOnly: true, renderSideBySide: true, scrollBeyondLastLine: false, wordWrap: 'on' }} />
               </div>
             </div>
           ) : null}
