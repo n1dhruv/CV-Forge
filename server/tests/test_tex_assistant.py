@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from app.api import resume_versions as resume_versions_api
 from app.models.resume import JobDescription, ResumeBulletSelection, ResumeVersion
@@ -84,7 +85,7 @@ async def test_context_keeps_current_and_selected_facts_before_capping() -> None
         title="remaining " + "x" * 100_000,
     )
     session = MagicMock()
-    session.scalar = AsyncMock(side_effect=[profile, jd])
+    session.scalar = AsyncMock(side_effect=[profile, jd, None])
     session.execute = AsyncMock(return_value=Rows([(selected, bullet, item)]))
     session.scalars = AsyncMock(return_value=Rows([remaining]))
 
@@ -274,3 +275,134 @@ async def test_provider_failures_are_a_safe_gateway_error(monkeypatch) -> None:
         )
 
     assert error.value.status_code == 502
+
+
+def test_context_cap_drops_remaining_evidence_before_current_or_selected_facts() -> None:
+    current = "CURRENT-" + "x" * 70_000
+    selected = "SELECTED-" + "y" * 1_000
+    context = {
+        "current_resume": {"tex_source": current},
+        "selected_bullet_evidence": [{"original_text": selected}],
+        "remaining_skill_bank": [{"title": "REMAINING-" + "z" * 20_000}],
+    }
+
+    capped = tex_assistant._capped_json(context)
+
+    assert current in capped and selected in capped
+    assert "REMAINING-" not in capped
+
+
+def test_context_cap_makes_no_progress_for_empty_strings() -> None:
+    assert tex_assistant._shrink({"text": ""}, 1) is False
+
+
+def test_pathological_structural_context_over_cap_terminates() -> None:
+    context = {
+        "current_resume": {"tex_source": ""},
+        "selected_bullet_evidence": [{"text": ""}] * 20_000,
+        "remaining_skill_bank": [],
+    }
+
+    assert tex_assistant._capped_json(context) == "{}"
+
+
+async def test_context_uses_account_email_when_contact_email_is_unset() -> None:
+    owner = uuid4()
+    resume = version(owner)
+    profile = User(id=owner, email="account@example.test", full_name="Ada")
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[profile, None, None])
+    session.execute = AsyncMock(return_value=Rows([]))
+    session.scalars = AsyncMock(return_value=Rows([]))
+
+    context = json.loads(await tex_assistant.build_context(session, owner, resume))
+
+    assert context["profile"]["contact_email"] == "account@example.test"
+
+
+async def test_context_uses_the_same_primary_education_ordering_as_assembly() -> None:
+    owner = uuid4()
+    resume = version(owner)
+    profile = User(id=owner, email="owner@example.test")
+    education = SkillBankItem(
+        id=uuid4(), user_id=owner, type="education", title="BSc Computer Science"
+    )
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[profile, None, education])
+    session.execute = AsyncMock(return_value=Rows([]))
+    session.scalars = AsyncMock(return_value=Rows([]))
+
+    context = json.loads(await tex_assistant.build_context(session, owner, resume))
+
+    sql = str(session.scalar.await_args_list[2].args[0].compile(dialect=postgresql.dialect()))
+    assert "skill_bank_items.end_date DESC NULLS LAST" in sql
+    assert "skill_bank_items.start_date DESC NULLS LAST" in sql
+    assert "skill_bank_items.created_at DESC" in sql
+    assert context["primary_education"]["title"] == "BSc Computer Science"
+
+
+def preservation_context() -> str:
+    return json.dumps(
+        {
+            "profile": {"full_name": "Ada Lovelace", "contact_email": "ada@example.test"},
+            "primary_education": {"title": "BSc Computer Science"},
+        }
+    )
+
+
+def preserved_source() -> str:
+    return source() + " Ada Lovelace ada@example.test BSc Computer Science"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        source() + " BSc Computer Science",
+        source() + " Ada Lovelace ada@example.test",
+    ],
+)
+async def test_missing_required_header_or_education_retries_then_returns_422(
+    monkeypatch, missing
+) -> None:
+    resume = version()
+    monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=resume))
+    monkeypatch.setattr(
+        tex_assistant, "build_context", AsyncMock(return_value=preservation_context())
+    )
+    completion = AsyncMock(
+        return_value=json.dumps({"message": "Missing required content.", "tex_source": missing})
+    )
+    monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
+    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+
+    with pytest.raises(HTTPException) as error:
+        await resume_versions_api.propose_tex(
+            resume.id,
+            request(),
+            MagicMock(),
+            type("User", (), {"id": resume.user_id})(),
+            MagicMock(tectonic_binary_path="tectonic", latex_compile_timeout_seconds=30),
+        )
+
+    assert error.value.status_code == 422
+    assert completion.await_count == 2
+
+
+async def test_proposal_preserving_required_header_and_education_passes(monkeypatch) -> None:
+    completion = AsyncMock(
+        return_value=json.dumps(
+            {"message": "Preserved required facts.", "tex_source": preserved_source()}
+        )
+    )
+    monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
+    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+
+    proposal = await tex_assistant.propose(
+        uuid4(),
+        request().instruction,
+        preservation_context(),
+        MagicMock(tectonic_binary_path="tectonic", latex_compile_timeout_seconds=30),
+    )
+
+    assert proposal.tex_source == preserved_source()
+    assert completion.await_count == 1

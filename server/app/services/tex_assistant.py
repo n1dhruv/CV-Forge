@@ -13,6 +13,7 @@ from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
 from app.schemas.resume_version import AssistantProposal
 from app.services import llm_client
+from app.services.latex import escape_latex
 from app.services.latex_compiler import CompilationError, CompileDiagnostic, compile_latex
 
 MAX_CONTEXT_CHARACTERS = 80_000
@@ -22,6 +23,10 @@ class InvalidAssistantProposalError(Exception):
     def __init__(self, diagnostic: str) -> None:
         super().__init__(diagnostic)
         self.diagnostic = diagnostic
+
+
+class InvalidAssistantPreservationError(Exception):
+    pass
 
 
 def _profile(user: User | None) -> dict[str, str | None]:
@@ -35,7 +40,10 @@ def _profile(user: User | None) -> dict[str, str | None]:
         "leetcode_url",
         "portfolio_url",
     )
-    return {field: getattr(user, field, None) for field in fields}
+    profile = {field: getattr(user, field, None) for field in fields}
+    if user is not None:
+        profile["contact_email"] = user.contact_email or user.email
+    return profile
 
 
 def _remaining_item(item: SkillBankItem) -> dict[str, Any]:
@@ -75,9 +83,14 @@ def _shrink(value: Any, overflow: int) -> bool:
     if not locations:
         return False
     container, key, text = max(locations, key=lambda item: len(item[2]))
+    if not text:
+        return False
     marker = " [truncated]"
     target = len(text) - overflow - 64
-    container[key] = text[: target - len(marker)] + marker if target > len(marker) else ""
+    replacement = text[: target - len(marker)] + marker if target > len(marker) else ""
+    if replacement == text:
+        return False
+    container[key] = replacement
     return True
 
 
@@ -86,11 +99,11 @@ def _capped_json(context: dict[str, Any]) -> str:
         serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         if len(serialized) <= MAX_CONTEXT_CHARACTERS:
             return serialized
+        remaining = context["remaining_skill_bank"]
+        if remaining:
+            remaining.pop()
+            continue
         if not _shrink(context, len(serialized) - MAX_CONTEXT_CHARACTERS):
-            remaining = context["remaining_skill_bank"]
-            if remaining:
-                remaining.pop()
-                continue
             return json.dumps({}, separators=(",", ":"))
 
 
@@ -103,6 +116,15 @@ async def build_context(session: AsyncSession, user_id: UUID, version: ResumeVer
                 JobDescription.id == version.jd_id, JobDescription.user_id == user_id
             )
         )
+    primary_education = await session.scalar(
+        select(SkillBankItem)
+        .where(SkillBankItem.user_id == user_id, SkillBankItem.type == "education")
+        .order_by(
+            SkillBankItem.end_date.desc().nullslast(),
+            SkillBankItem.start_date.desc().nullslast(),
+            SkillBankItem.created_at.desc(),
+        )
+    )
     selected_rows = list(
         (
             await session.execute(
@@ -118,6 +140,8 @@ async def build_context(session: AsyncSession, user_id: UUID, version: ResumeVer
         ).all()
     )
     selected_item_ids = {item.id for _, _, item in selected_rows}
+    if primary_education is not None:
+        selected_item_ids.add(primary_education.id)
     selected_skill_ids = {
         snapshot.get("item_id")
         for snapshot in version.selected_skills or []
@@ -149,6 +173,7 @@ async def build_context(session: AsyncSession, user_id: UUID, version: ResumeVer
         "selected_skill_snapshots": [
             snapshot for snapshot in version.selected_skills or [] if isinstance(snapshot, dict)
         ],
+        "primary_education": _remaining_item(primary_education) if primary_education else None,
         "remaining_skill_bank": [
             _remaining_item(item)
             for item in remaining
@@ -179,7 +204,33 @@ def _diagnostic(error: Exception) -> str:
         diagnostic: CompileDiagnostic = error.diagnostic
         line = f" at line {diagnostic.line}" if diagnostic.line is not None else ""
         return f"The proposed TeX failed {diagnostic.kind} validation{line}: {diagnostic.message}"
+    if isinstance(error, InvalidAssistantPreservationError):
+        return str(error)
     return "The response was not valid JSON with a short message and complete TeX source"
+
+
+def _validate_preservation(source: str, context: str) -> None:
+    try:
+        facts = json.loads(context)
+    except json.JSONDecodeError:
+        return
+    profile = facts.get("profile") if isinstance(facts, dict) else None
+    if isinstance(profile, dict):
+        name = profile.get("full_name") or profile.get("contact_email")
+        contact_email = profile.get("contact_email")
+        required_header = [
+            value for value in (name, contact_email) if isinstance(value, str) and value
+        ]
+        if any(escape_latex(value) not in source for value in required_header):
+            raise InvalidAssistantPreservationError(
+                "The proposed TeX must preserve the required header"
+            )
+    education = facts.get("primary_education") if isinstance(facts, dict) else None
+    if isinstance(education, dict) and isinstance(education.get("title"), str):
+        if escape_latex(education["title"]) not in source:
+            raise InvalidAssistantPreservationError(
+                "The proposed TeX must preserve the primary education"
+            )
 
 
 async def propose(
@@ -197,8 +248,9 @@ async def propose(
                 settings.latex_compile_timeout_seconds,
                 enforce_one_page=True,
             )
+            _validate_preservation(proposal.tex_source, context)
             return proposal
-        except (ValidationError, CompilationError) as error:
+        except (ValidationError, CompilationError, InvalidAssistantPreservationError) as error:
             diagnostic = _diagnostic(error)
             if attempt == 0:
                 messages.append(
