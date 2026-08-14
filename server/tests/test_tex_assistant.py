@@ -351,7 +351,16 @@ def preservation_context() -> str:
 
 
 def preserved_source() -> str:
-    return source() + " Ada Lovelace ada@example.test BSc Computer Science"
+    return (
+        "\\documentclass{article}\\begin{document}"
+        "Ada Lovelace ada@example.test BSc Computer Science"
+        "\\end{document}"
+    )
+
+
+def rendered_pdf(text: str):
+    page = type("Page", (), {"extract_text": lambda self: text})()
+    return type("Pdf", (), {"pages": [page]})()
 
 
 @pytest.mark.parametrize(
@@ -374,6 +383,9 @@ async def test_missing_required_header_or_education_retries_then_returns_422(
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
     monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant, "PdfReader", lambda _: rendered_pdf("missing"), raising=False
+    )
 
     with pytest.raises(HTTPException) as error:
         await resume_versions_api.propose_tex(
@@ -396,6 +408,12 @@ async def test_proposal_preserving_required_header_and_education_passes(monkeypa
     )
     monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
     monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant,
+        "PdfReader",
+        lambda _: rendered_pdf("Ada Lovelace ada@example.test BSc Computer Science"),
+        raising=False,
+    )
 
     proposal = await tex_assistant.propose(
         uuid4(),
@@ -406,3 +424,33 @@ async def test_proposal_preserving_required_header_and_education_passes(monkeypa
 
     assert proposal.tex_source == preserved_source()
     assert completion.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "hidden_source",
+    [
+        source() + "% Ada Lovelace ada@example.test BSc Computer Science\n",
+        source() + " Ada Lovelace ada@example.test BSc Computer Science",
+    ],
+)
+async def test_comment_or_post_document_preservation_is_rejected(
+    monkeypatch, hidden_source
+) -> None:
+    completion = AsyncMock(
+        return_value=json.dumps({"message": "Hidden required facts.", "tex_source": hidden_source})
+    )
+    monkeypatch.setattr(tex_assistant.llm_client, "get_completion", completion)
+    monkeypatch.setattr(tex_assistant, "compile_latex", MagicMock(return_value=b"%PDF-1.4"))
+    monkeypatch.setattr(
+        tex_assistant, "PdfReader", lambda _: rendered_pdf("visible only"), raising=False
+    )
+
+    with pytest.raises(tex_assistant.InvalidAssistantProposalError):
+        await tex_assistant.propose(
+            uuid4(),
+            request().instruction,
+            preservation_context(),
+            MagicMock(tectonic_binary_path="tectonic", latex_compile_timeout_seconds=30),
+        )
+
+    assert completion.await_count == 2

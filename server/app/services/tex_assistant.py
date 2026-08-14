@@ -1,8 +1,10 @@
 import json
+from io import BytesIO
 from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
+from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,7 +15,6 @@ from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
 from app.schemas.resume_version import AssistantProposal
 from app.services import llm_client
-from app.services.latex import escape_latex
 from app.services.latex_compiler import CompilationError, CompileDiagnostic, compile_latex
 
 MAX_CONTEXT_CHARACTERS = 80_000
@@ -209,11 +210,23 @@ def _diagnostic(error: Exception) -> str:
     return "The response was not valid JSON with a short message and complete TeX source"
 
 
-def _validate_preservation(source: str, context: str) -> None:
+def _visible_text(pdf: bytes) -> str:
+    try:
+        return " ".join(
+            text for page in PdfReader(BytesIO(pdf)).pages if (text := page.extract_text())
+        )
+    except Exception as exc:
+        raise InvalidAssistantPreservationError(
+            "The compiled PDF could not be checked for required content"
+        ) from exc
+
+
+def _validate_preservation(pdf: bytes, context: str) -> None:
     try:
         facts = json.loads(context)
     except json.JSONDecodeError:
         return
+    visible = " ".join(_visible_text(pdf).split())
     profile = facts.get("profile") if isinstance(facts, dict) else None
     if isinstance(profile, dict):
         name = profile.get("full_name") or profile.get("contact_email")
@@ -221,13 +234,13 @@ def _validate_preservation(source: str, context: str) -> None:
         required_header = [
             value for value in (name, contact_email) if isinstance(value, str) and value
         ]
-        if any(escape_latex(value) not in source for value in required_header):
+        if any(" ".join(value.split()) not in visible for value in required_header):
             raise InvalidAssistantPreservationError(
                 "The proposed TeX must preserve the required header"
             )
     education = facts.get("primary_education") if isinstance(facts, dict) else None
     if isinstance(education, dict) and isinstance(education.get("title"), str):
-        if escape_latex(education["title"]) not in source:
+        if " ".join(education["title"].split()) not in visible:
             raise InvalidAssistantPreservationError(
                 "The proposed TeX must preserve the primary education"
             )
@@ -242,13 +255,13 @@ async def propose(
         try:
             raw = await llm_client.get_completion(user_id, messages)
             proposal = AssistantProposal.model_validate_json(raw)
-            compile_latex(
+            pdf = compile_latex(
                 proposal.tex_source,
                 settings.tectonic_binary_path,
                 settings.latex_compile_timeout_seconds,
                 enforce_one_page=True,
             )
-            _validate_preservation(proposal.tex_source, context)
+            _validate_preservation(pdf, context)
             return proposal
         except (ValidationError, CompilationError, InvalidAssistantPreservationError) as error:
             diagnostic = _diagnostic(error)
