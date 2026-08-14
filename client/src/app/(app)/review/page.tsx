@@ -8,7 +8,8 @@ import { useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/PageHeader'
 import { ScreenState } from '@/components/ScreenState'
 import { useApi } from '@/hooks/useApi'
-import type { MatchedBullet, MatchedItem } from '@/lib/types'
+import { matchSelection, orderedSelections, selectionKey } from '@/lib/task4'
+import type { MatchedBullet, MatchedItem, RewriteSelection } from '@/lib/types'
 
 const date = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short' })
 const formatDate = (value: string | null) => value ? date.format(new Date(`${value}T00:00:00`)) : 'Present'
@@ -33,27 +34,26 @@ export default function MatchReview() {
 
   useEffect(() => {
     if (matchData && initializedFrom.current !== jdId) {
-      const allIds = matchData.items.flatMap(item =>
-        item.bullets.flatMap(bullet => bullet.bullet_point_id ? [bullet.bullet_point_id] : []),
-      )
-      setSelected(new Set(allIds))
+      setSelected(new Set(orderedSelections(matchData.items).map(selectionKey)))
       initializedFrom.current = jdId
     }
   }, [jdId, matchData])
 
   const startRewrite = useMutation({
     mutationFn: async () => {
+      if (!matchData) throw new Error('Match results are not ready.')
       const version = await api.resumeVersions.create(jdId!)
-      return api.resumeVersions.rewrite(version.id, [...selected])
+      return api.resumeVersions.rewrite(version.id, orderedSelections(matchData.items, selected))
     },
     onSuccess: queued => router.push(`/rewrite?version=${queued.resume_version_id}&job=${queued.background_job_id}&jd=${jdId}`),
   })
 
-  function toggleBullet(id: string) {
+  function toggleSelection(selection: RewriteSelection) {
+    const key = selectionKey(selection)
     setSelected(current => {
       const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -97,10 +97,9 @@ export default function MatchReview() {
   if (!matchData) return null
 
   const count = matchData.items.reduce((total, item) => total + item.bullets.length, 0)
-  const selectableCount = matchData.items.reduce(
-    (total, item) => total + item.bullets.filter(bullet => bullet.bullet_point_id).length,
-    0,
-  )
+  const selectableCount = count
+  const selectedSelections = orderedSelections(matchData.items, selected)
+  const selectedBulletCount = selectedSelections.filter(selection => selection.kind === 'bullet').length
   const unmatched = matchData.requirements.filter(requirement => requirement.no_match)
   
   return (
@@ -146,7 +145,7 @@ export default function MatchReview() {
             
             <div className="divide-y">
               {matchData.items.map((item, index) => (
-                <MatchedSource key={item.id} item={item} index={index} selected={selected} onToggle={toggleBullet} />
+                <MatchedSource key={item.id} item={item} index={index} selected={selected} onToggle={toggleSelection} />
               ))}
             </div>
           </div>
@@ -182,14 +181,14 @@ export default function MatchReview() {
           <div className="container-normal flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-muted" aria-live="polite">
-                <strong className="text-ink">{selected.size} selected</strong> for a new, reviewable resume draft
+                <strong className="text-ink">{selectedSelections.length} selected</strong> for a new, reviewable resume draft
               </p>
               {startRewrite.isError ? <p className="mt-1 text-sm font-medium text-danger" role="alert">{startRewrite.error.message}</p> : null}
             </div>
             <button
               type="button"
               className="button-primary"
-              disabled={!selected.size || startRewrite.isPending}
+              disabled={!selectedBulletCount || startRewrite.isPending}
               onClick={() => startRewrite.mutate()}
             >
               {startRewrite.isPending ? <LoaderCircle className="animate-spin" size={16} aria-hidden="true" /> : <WandSparkles size={16} aria-hidden="true" />}
@@ -202,7 +201,7 @@ export default function MatchReview() {
   )
 }
 
-function MatchedSource({ item, index, selected, onToggle }: { item: MatchedItem; index: number; selected: Set<string>; onToggle: (id: string) => void }) {
+function MatchedSource({ item, index, selected, onToggle }: { item: MatchedItem; index: number; selected: Set<string>; onToggle: (selection: RewriteSelection) => void }) {
   return (
     <article className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-10 transition-colors hover:bg-raised/30">
       <header className="lg:sticky lg:top-24 lg:self-start">
@@ -220,14 +219,17 @@ function MatchedSource({ item, index, selected, onToggle }: { item: MatchedItem;
       </header>
       
       <ol className="divide-y border-t lg:border-t-0 lg:border-l lg:pl-10">
-        {item.bullets.map(bullet => (
+        {item.bullets.map(bullet => {
+          const selection = matchSelection(bullet)!
+          return (
           <MatchedEvidence
-            key={bullet.bullet_point_id ?? bullet.skill_bank_item_id}
+            key={selectionKey(selection)}
             bullet={bullet}
-            selected={!!bullet.bullet_point_id && selected.has(bullet.bullet_point_id)}
-            onToggle={() => bullet.bullet_point_id && onToggle(bullet.bullet_point_id)}
+            selected={selected.has(selectionKey(selection))}
+            onToggle={() => onToggle(selection)}
           />
-        ))}
+          )
+        })}
       </ol>
     </article>
   )
@@ -235,16 +237,13 @@ function MatchedSource({ item, index, selected, onToggle }: { item: MatchedItem;
 
 function MatchedEvidence({ bullet, selected, onToggle }: { bullet: MatchedBullet; selected: boolean; onToggle: () => void }) {
   const strong = bullet.confidence === 'strong'
-  const selectable = !!bullet.bullet_point_id
   
   return (
     <li className="grid gap-4 py-6 sm:grid-cols-[2.5rem_minmax(0,1fr)] first:pt-4 lg:first:pt-0 last:pb-0">
-      {selectable ? (
-        <label className="flex min-h-11 min-w-11 cursor-pointer items-start justify-center pt-1" aria-label={`Select proof point: ${bullet.text}`}>
+      <label className="flex min-h-11 min-w-11 cursor-pointer items-start justify-center pt-1" aria-label={`Select ${bullet.skill_bank_item_id ? 'skill' : 'proof point'}: ${bullet.text}`}>
           <input className="mt-0.5 size-4 accent-accent" type="checkbox" checked={selected} onChange={onToggle} />
-          <span className="sr-only">Select proof point: {bullet.text}</span>
+          <span className="sr-only">Select {bullet.skill_bank_item_id ? 'skill' : 'proof point'}: {bullet.text}</span>
         </label>
-      ) : <span aria-hidden="true" />}
       <div>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider ${
@@ -253,7 +252,8 @@ function MatchedEvidence({ bullet, selected, onToggle }: { bullet: MatchedBullet
             {strong && <CheckCircle2 size={12} />}
             {strong ? 'Strong match' : 'Moderate match'}
           </span>
-          {!selectable ? <span className="tag">Skill entry</span> : null}
+          {bullet.skill_bank_item_id ? <span className="tag">Skill entry</span> : null}
+          {bullet.recommended ? <span className="tag !border-accent/40 bg-accent-soft text-ink">Recommended</span> : null}
         </div>
         
         <p className="leading-relaxed text-ink/90">{bullet.text}</p>

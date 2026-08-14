@@ -6,6 +6,7 @@ import type {
   ResumeBulletSelection, ResumeBulletSelectionUpdate, ResumeVersion, RewriteQueued,
   ResumeOperationQueued, ResumeVersionDetail, ResumeVersionHistoryItem,
   ResumeFamily, ResumeMetadataUpdate,
+  AssistantProposal, Profile, ProfileUpdate, RewriteSelection,
 } from './types'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
@@ -63,10 +64,14 @@ export function createApiClient(getToken: GetToken) {
       getStatus: (id: string) => request<BackgroundJob>(`/api/background_jobs/${id}`),
     },
     match: (jdId: string) => request<MatchResult>(`/api/match/${jdId}`, { method: 'POST' }),
+    profile: {
+      get: () => request<Profile>('/api/profile'),
+      update: (profile: ProfileUpdate) => request<Profile>('/api/profile', { method: 'PUT', body: JSON.stringify(profile) }),
+    },
     resumeVersions: {
       list: () => request<ResumeFamily[]>('/api/resume_versions'),
       create: (jdId: string) => request<ResumeVersion>('/api/resume_versions', { method: 'POST', body: JSON.stringify({ jd_id: jdId }) }),
-      rewrite: (id: string, bulletPointIds: string[]) => request<RewriteQueued>(`/api/resume_versions/${id}/rewrite`, { method: 'POST', body: JSON.stringify({ bullet_point_ids: bulletPointIds }) }),
+      rewrite: (id: string, selections: RewriteSelection[]) => request<RewriteQueued>(`/api/resume_versions/${id}/rewrite`, { method: 'POST', body: JSON.stringify({ selections }) }),
       bullets: (id: string) => request<ResumeBulletSelection[]>(`/api/resume_versions/${id}/bullets`),
       updateBullet: (id: string, payload: ResumeBulletSelectionUpdate) => request<ResumeBulletSelection>(`/api/resume_bullet_selections/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
       finalize: (id: string) => request<ResumeVersion>(`/api/resume_versions/${id}/finalize`, { method: 'POST' }),
@@ -77,6 +82,7 @@ export function createApiClient(getToken: GetToken) {
       snapshot: (id: string) => request<ResumeVersionDetail>(`/api/resume_versions/${id}/versions`, { method: 'POST' }),
       history: (id: string) => request<ResumeVersionHistoryItem[]>(`/api/resume_versions/${id}/history`),
       updateMetadata: (id: string, payload: ResumeMetadataUpdate) => request<ResumeVersionDetail>(`/api/resume_versions/${id}/metadata`, { method: 'PUT', body: JSON.stringify(payload) }),
+      assistant: (id: string, instruction: string) => request<AssistantProposal>(`/api/resume_versions/${id}/assistant`, { method: 'POST', body: JSON.stringify({ instruction }) }),
     },
     resumeImports: {
       create: (file: File) => { const body = new FormData(); body.append('file', file); return request<ResumeImportQueued>('/api/resume_imports', { method: 'POST', body }) },

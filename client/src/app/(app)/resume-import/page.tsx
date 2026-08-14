@@ -1,7 +1,7 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, FileUp, LoaderCircle, Trash2, X, AlertCircle } from 'lucide-react'
+import { AlertCircle, Check, FileUp, LoaderCircle, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -12,10 +12,21 @@ import { useBackgroundJobStatus } from '@/hooks/useBackgroundJobStatus'
 import { Reveal } from '@/components/motion/Reveal'
 import { Stagger, StaggerItem } from '@/components/motion/Stagger'
 import { motion } from 'framer-motion'
-import type { ResumeImportCommit, ResumeImportItem, ResumeImportQueued } from '@/lib/types'
+import { profileLinkError } from '@/lib/task4'
+import type { ResumeImportCommit, ResumeImportItem, ResumeImportProfile, ResumeImportQueued, ResumeImportSkill } from '@/lib/types'
 
 type ReviewItem = ResumeImportItem & { key: string; included: boolean }
-type ReviewSkill = { name: string; included: boolean }
+type ReviewSkill = ResumeImportSkill & { included: boolean }
+const profileFields: Array<{ name: keyof ResumeImportProfile; label: string; type?: 'email' | 'tel' | 'url' }> = [
+  { name: 'full_name', label: 'Full name' },
+  { name: 'contact_email', label: 'Contact email', type: 'email' },
+  { name: 'phone', label: 'Phone', type: 'tel' },
+  { name: 'location', label: 'Location' },
+  { name: 'linkedin_url', label: 'LinkedIn URL', type: 'url' },
+  { name: 'github_url', label: 'GitHub URL', type: 'url' },
+  { name: 'leetcode_url', label: 'LeetCode URL', type: 'url' },
+  { name: 'portfolio_url', label: 'Portfolio URL', type: 'url' },
+]
 const accepted = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
 
 export default function ResumeImport() {
@@ -29,6 +40,8 @@ export default function ResumeImport() {
   const [queued, setQueued] = useState<ResumeImportQueued | null>(null)
   const [items, setItems] = useState<ReviewItem[]>([])
   const [skills, setSkills] = useState<ReviewSkill[]>([])
+  const [profile, setProfile] = useState<ResumeImportProfile | null>(null)
+  const [profileIncluded, setProfileIncluded] = useState(false)
 
   const submit = useMutation({
     mutationFn: () => api.resumeImports.create(file!),
@@ -46,14 +59,16 @@ export default function ResumeImport() {
     if (!parsed || initialized.current === detail.data?.id) return
     initialized.current = detail.data!.id
     setItems(parsed.items.map((item, index) => ({ ...item, key: `${detail.data!.id}-${index}`, included: true })))
-    setSkills(parsed.skills.map(name => ({ name, included: true })))
+    setSkills(parsed.skills.map(skill => ({ ...skill, included: true })))
+    setProfile(parsed.profile)
+    setProfileIncluded(!!parsed.profile && profileFields.some(field => !!parsed.profile?.[field.name]))
   }, [detail.data])
 
   const commit = useMutation({
     mutationFn: (payload: ResumeImportCommit) => api.resumeImports.commit(queued!.resume_import_id, payload),
     onSuccess: async (result, payload) => {
       await queryClient.invalidateQueries({ queryKey: ['skill-bank'] })
-      navigate.replace(payload.items.length ? `/skill-bank?importedCount=${result.items.length}` : `/skill-bank?type=skill&importedCount=${result.items.length}`)
+      navigate.replace(payload.items.length ? `/skill-bank?importedCount=${result.items.length}` : payload.skills.length ? `/skill-bank?type=skill&importedCount=${result.items.length}` : '/profile')
     },
     onSettled: () => { commitLock.current = false },
   })
@@ -83,11 +98,13 @@ export default function ResumeImport() {
     if (commitLock.current) return
     const selectedItems = items.filter(item => item.included).map(item => ({ type: item.type, title: item.title.trim(), org: item.org?.trim() || null, start_date: item.start_date, end_date: item.end_date, bullets: item.bullets.map(bullet => bullet.trim()) }))
     commitLock.current = true
-    commit.mutate({ items: selectedItems, skills: selectedSkills })
+    commit.mutate({ items: selectedItems, skills: selectedSkills, profile: profileIncluded ? profile : null })
   }
 
   const selectedItems = items.filter(item => item.included)
-  const selectedSkills = skills.filter(skill => skill.included).map(skill => skill.name)
+  const selectedSkills = skills.filter(skill => skill.included).map(({ name, category }) => ({ name: name.trim(), category: category?.trim() || null }))
+  const profileLinkErrors = profile ? Object.fromEntries(profileFields.filter(field => field.type === 'url').map(field => [field.name, profileLinkError(profile[field.name] ?? '')])) as Partial<Record<keyof ResumeImportProfile, string>> : {}
+  const invalidProfile = profileIncluded && Object.values(profileLinkErrors).some(Boolean)
   const invalid = selectedItems.some(item => !item.title.trim() || item.bullets.some(bullet => !bullet.trim()))
   const running = !!queued && (job.isPending || job.data?.status === 'queued' || job.data?.status === 'running')
   const failure = job.data?.status === 'failed' ? job.data.error || 'The import worker could not finish this resume.' : null
@@ -193,6 +210,41 @@ export default function ResumeImport() {
                 {selectedItems.length} of {items.length} items selected
               </p>
             </div>
+
+            {profile ? (
+              <section className="mb-10 rounded-xl border bg-surface p-6 shadow-sm sm:p-8" aria-labelledby="profile-review-title">
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5">
+                  <div>
+                    <h3 id="profile-review-title" className="font-display text-2xl font-medium">Profile found</h3>
+                    <p className="mt-2 text-sm text-muted">Review the contact details before updating your profile.</p>
+                  </div>
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold">
+                    <input className="size-4 accent-accent" type="checkbox" checked={profileIncluded} onChange={event => setProfileIncluded(event.target.checked)} />
+                    Update profile
+                  </label>
+                </div>
+                <fieldset className="mt-6 grid gap-5 sm:grid-cols-2" disabled={!profileIncluded}>
+                  {profileFields.map(field => {
+                    const error = profileLinkErrors[field.name]
+                    return (
+                      <label className="text-sm font-semibold" htmlFor={`import-profile-${field.name}`} key={field.name}>
+                        {field.label}
+                        <input
+                          id={`import-profile-${field.name}`}
+                          className="field mt-2.5 bg-canvas font-normal"
+                          type={field.type ?? 'text'}
+                          value={profile[field.name] ?? ''}
+                          aria-invalid={!!error}
+                          aria-describedby={error ? `import-profile-${field.name}-error` : undefined}
+                          onChange={event => setProfile(current => current ? { ...current, [field.name]: event.target.value || null } : current)}
+                        />
+                        {error ? <span className="mt-2 block font-normal text-danger" id={`import-profile-${field.name}-error`}>{error}</span> : null}
+                      </label>
+                    )
+                  })}
+                </fieldset>
+              </section>
+            ) : null}
             
             <div className="space-y-8">
               <Stagger staggerDelay={0.05}>
@@ -216,24 +268,20 @@ export default function ResumeImport() {
               </div>
               
               {skills.length ? (
-                <div className="mt-6 flex flex-wrap gap-2.5">
-                  {skills.map(skill => (
-                    <button 
-                      type="button" 
-                      aria-pressed={skill.included} 
-                      className={`tag gap-1.5 px-3 py-1.5 transition-all ${
-                        skill.included 
-                          ? '!border-accent/40 bg-accent-soft text-ink shadow-sm' 
-                          : 'opacity-50 hover:opacity-100 bg-surface'
-                      }`} 
-                      key={skill.name} 
-                      onClick={() => setSkills(current => current.map(item => item.name === skill.name ? { ...item, included: !item.included } : item))}
-                    >
-                      {skill.included ? <Check size={14} className="text-accent" aria-hidden="true" /> : <X size={14} className="text-muted" aria-hidden="true" />}
-                      {skill.name}
-                    </button>
+                <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+                  {skills.map((skill, index) => (
+                    <li className={`grid gap-3 rounded-lg border bg-surface p-3 sm:grid-cols-[minmax(0,1fr)_minmax(8rem,.7fr)] sm:items-end ${skill.included ? '' : 'opacity-60'}`} key={`${skill.name}-${index}`}>
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold">
+                        <input className="size-4 accent-accent" type="checkbox" checked={skill.included} onChange={() => setSkills(current => current.map((item, currentIndex) => currentIndex === index ? { ...item, included: !item.included } : item))} />
+                        {skill.name}
+                      </label>
+                      <label className="text-xs font-semibold text-muted" htmlFor={`skill-category-${index}`}>
+                        Category
+                        <input id={`skill-category-${index}`} className="field mt-1 !min-h-10 bg-canvas font-normal" disabled={!skill.included} placeholder="e.g. Languages" value={skill.category ?? ''} onChange={event => setSkills(current => current.map((item, currentIndex) => currentIndex === index ? { ...item, category: event.target.value || null } : item))} />
+                      </label>
+                    </li>
                   ))}
-                </div>
+                </ul>
               ) : (
                 <p className="mt-6 text-sm text-muted">No skills were extracted from this resume.</p>
               )}
@@ -249,13 +297,13 @@ export default function ResumeImport() {
             <div>
               <p className="text-sm font-semibold text-ink">Nothing is saved until you confirm.</p>
               <p className="mt-1 text-xs text-muted">
-                {selectedItems.length} {selectedItems.length === 1 ? 'item' : 'items'} · {selectedSkills.length} {selectedSkills.length === 1 ? 'skill' : 'skills'} selected
+                {selectedItems.length} {selectedItems.length === 1 ? 'item' : 'items'} · {selectedSkills.length} {selectedSkills.length === 1 ? 'skill' : 'skills'}{profileIncluded ? ' · profile' : ''} selected
               </p>
             </div>
             
             <button 
               className="button-primary" 
-              disabled={(!selectedItems.length && !selectedSkills.length) || invalid || commit.isPending} 
+              disabled={(!selectedItems.length && !selectedSkills.length && !profileIncluded) || invalid || invalidProfile || commit.isPending} 
               onClick={commitSelected}
             >
               <Check size={16} aria-hidden="true" />
@@ -268,6 +316,7 @@ export default function ResumeImport() {
               <AlertCircle size={14} /> Selected items need a title, and kept bullets cannot be empty.
             </p>
           )}
+          {invalidProfile && <p className="mt-3 flex items-center gap-2 text-xs font-medium text-danger" role="alert"><AlertCircle size={14} /> Profile links need complete http:// or https:// URLs.</p>}
           {commit.error && (
             <p className="mt-3 flex items-center gap-2 text-xs font-medium text-danger" role="alert">
               <AlertCircle size={14} /> {commit.error.message}

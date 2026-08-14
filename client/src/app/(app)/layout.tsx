@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Settings,
   Sun,
+  UserRound,
   X,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -28,6 +29,7 @@ import { useEffect } from 'react'
 
 const nav = [
   ['/dashboard', 'Dashboard', LayoutDashboard],
+  ['/profile', 'Profile', UserRound],
   ['/skill-bank', 'Skill bank', BookOpen],
   ['/resume-import', 'Import resume', FileUp],
   ['/job-description', 'Job descriptions', FileInput],
