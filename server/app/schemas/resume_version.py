@@ -62,6 +62,15 @@ class ResumeTexUpdate(BaseModel):
     tex_source: str = Field(min_length=1, max_length=500_000)
 
 
+class AssistantRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=4_000)
+
+
+class AssistantProposal(BaseModel):
+    message: str = Field(min_length=1, max_length=1_000)
+    tex_source: str = Field(min_length=1, max_length=500_000)
+
+
 class ResumeVersionDetail(ResumeVersionRead):
     tex_source: str | None
     parent_version_id: UUID | None

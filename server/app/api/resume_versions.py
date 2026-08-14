@@ -12,6 +12,8 @@ from app.db.session import get_db_session
 from app.schemas.resume_version import (
     ResumeBulletSelectionRead,
     ResumeBulletSelectionUpdate,
+    AssistantProposal,
+    AssistantRequest,
     ResumeVersionCreate,
     ResumeOperationQueued,
     ResumeTexUpdate,
@@ -24,7 +26,7 @@ from app.schemas.resume_version import (
     RewriteQueued,
     RewriteRequest,
 )
-from app.services import resume_versions, rewriter
+from app.services import llm_client, resume_versions, rewriter, tex_assistant
 from app.services.storage import StorageService
 
 router = APIRouter(tags=["resume-versions"])
@@ -229,6 +231,30 @@ async def update_resume_tex(
     if version is None:
         raise HTTPException(status_code=404, detail="Resume version not found")
     return await _version_detail(version, settings)
+
+
+@router.post("/api/resume_versions/{version_id}/assistant", response_model=AssistantProposal)
+async def propose_tex(
+    version_id: UUID,
+    payload: AssistantRequest,
+    session: Session,
+    current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AssistantProposal:
+    version = await resume_versions.get_owned(session, current_user.id, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Resume version not found")
+    if version.status not in resume_versions.STABLE_SOURCE_STATUSES or not version.tex_source:
+        raise HTTPException(status_code=409, detail="Resume source is not ready for assistance")
+    context = await tex_assistant.build_context(session, current_user.id, version)
+    try:
+        return await tex_assistant.propose(current_user.id, payload.instruction, context, settings)
+    except llm_client.LLMNotConfiguredError as exc:
+        raise HTTPException(status_code=422, detail="No LLM provider configured") from exc
+    except llm_client.LLMError as exc:
+        raise HTTPException(status_code=502, detail="Unable to generate resume proposal") from exc
+    except tex_assistant.InvalidAssistantProposalError as exc:
+        raise HTTPException(status_code=422, detail=exc.diagnostic) from exc
 
 
 @router.put("/api/resume_versions/{version_id}/metadata", response_model=ResumeVersionDetail)
