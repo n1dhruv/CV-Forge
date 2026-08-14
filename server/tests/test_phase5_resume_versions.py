@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.api import resume_versions as resume_versions_api
 from app.models.resume import ResumeVersion
-from app.schemas.resume_version import ResumeMetadataUpdate
+from app.schemas.resume_version import ResumeMetadataUpdate, RewriteRequest
 from app.services import resume_versions
 
 
@@ -26,6 +26,26 @@ def test_resume_metadata_is_trimmed_and_nonempty() -> None:
 
     with pytest.raises(ValueError):
         ResumeMetadataUpdate(name="   ")
+
+
+def test_rewrite_request_accepts_ordered_unique_bullet_and_skill_selections() -> None:
+    bullet_id, skill_id = uuid4(), uuid4()
+
+    request = RewriteRequest(
+        selections=[
+            {"kind": "bullet", "id": bullet_id},
+            {"kind": "skill", "id": skill_id},
+        ]
+    )
+
+    assert [(selection.kind, selection.id) for selection in request.selections] == [
+        ("bullet", bullet_id),
+        ("skill", skill_id),
+    ]
+    with pytest.raises(ValueError):
+        RewriteRequest(
+            selections=[{"kind": "bullet", "id": bullet_id}] * 2,
+        )
 
 
 async def test_queue_assembly_moves_finalized_version_to_assembling(monkeypatch) -> None:

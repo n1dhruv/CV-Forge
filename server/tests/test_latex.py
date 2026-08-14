@@ -36,6 +36,34 @@ def test_render_resume_is_deterministic_and_omits_empty_sections() -> None:
     assert r"\n" not in first
 
 
+def test_render_resume_groups_skill_categories_and_omits_empty_itemize() -> None:
+    source = render_resume(
+        [
+            LatexItem(
+                type="skill",
+                title="Python",
+                org=None,
+                start_date=None,
+                end_date=None,
+                bullets=[],
+                category="Languages",
+            ),
+            LatexItem(
+                type="education",
+                title="B.Tech Computer Science",
+                org="Example University",
+                start_date=date(2020, 1, 1),
+                end_date=date(2024, 1, 1),
+                bullets=[],
+            ),
+        ]
+    )
+
+    assert r"\textbf{Languages:} Python" in source
+    assert "B.Tech Computer Science" in source
+    assert r"\begin{itemize}" not in source
+
+
 def test_parse_diagnostics_extracts_line_and_hides_raw_log() -> None:
     diagnostic = parse_diagnostics("error: Missing } inserted\n  --> resume.tex:42:8")
 
@@ -64,6 +92,9 @@ def test_compile_latex_returns_pdf_bytes(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr("app.services.latex_compiler.TemporaryDirectory", lambda: _Temp(tmp_path))
     monkeypatch.setattr("app.services.latex_compiler.subprocess.run", run)
+    monkeypatch.setattr(
+        "app.services.latex_compiler.PdfReader", lambda _: type("Pdf", (), {"pages": [1]})()
+    )
 
     assert compile_latex("source", "tectonic", 30) == b"%PDF-test"
 
@@ -96,6 +127,42 @@ def test_compile_latex_keeps_error_after_many_warnings(monkeypatch, tmp_path) ->
 
     assert error.value.diagnostic.message == "Font metric missing"
     assert error.value.diagnostic.line == 10
+
+
+def test_compile_latex_rejects_a_pdf_that_is_not_one_page(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.services.latex_compiler.TemporaryDirectory", lambda: _Temp(tmp_path))
+    monkeypatch.setattr(
+        "app.services.latex_compiler.subprocess.run",
+        lambda command, **kwargs: (
+            (tmp_path / "resume.pdf").write_bytes(b"%PDF-test"),
+            CompletedProcess(command, 0, "", ""),
+        )[1],
+    )
+    monkeypatch.setattr(
+        "app.services.latex_compiler.PdfReader", lambda _: type("Pdf", (), {"pages": [1, 2]})()
+    )
+
+    with pytest.raises(CompilationError) as error:
+        compile_latex("source", "tectonic", 30)
+
+    assert error.value.diagnostic.kind == "layout"
+    assert error.value.diagnostic.message == "Resume must fit exactly one page"
+
+
+def test_assembly_compile_can_measure_a_multi_page_pdf(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.services.latex_compiler.TemporaryDirectory", lambda: _Temp(tmp_path))
+    monkeypatch.setattr(
+        "app.services.latex_compiler.subprocess.run",
+        lambda command, **kwargs: (
+            (tmp_path / "resume.pdf").write_bytes(b"%PDF-test"),
+            CompletedProcess(command, 0, "", ""),
+        )[1],
+    )
+    monkeypatch.setattr(
+        "app.services.latex_compiler.PdfReader", lambda _: type("Pdf", (), {"pages": [1, 2]})()
+    )
+
+    assert compile_latex("source", "tectonic", 30, enforce_one_page=False) == b"%PDF-test"
 
 
 class _Temp:

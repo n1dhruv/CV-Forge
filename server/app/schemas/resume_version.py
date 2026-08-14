@@ -97,13 +97,21 @@ class ResumeFamilyRead(BaseModel):
     versions: list[ResumeVersionListItem]
 
 
+class RewriteSelection(BaseModel):
+    kind: Literal["bullet", "skill"]
+    id: UUID
+
+
 class RewriteRequest(BaseModel):
-    bullet_point_ids: list[UUID] = Field(min_length=1, max_length=50)
+    selections: list[RewriteSelection] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
-    def unique_bullets(self) -> Self:
-        if len(set(self.bullet_point_ids)) != len(self.bullet_point_ids):
-            raise ValueError("bullet_point_ids must be unique")
+    def valid_selections(self) -> Self:
+        pairs = [(selection.kind, selection.id) for selection in self.selections]
+        if len(set(pairs)) != len(pairs):
+            raise ValueError("selections must be unique by kind and id")
+        if not any(selection.kind == "bullet" for selection in self.selections):
+            raise ValueError("select at least one bullet")
         return self
 
 

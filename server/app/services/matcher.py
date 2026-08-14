@@ -212,6 +212,7 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
                 MatchedRequirement(
                     id=requirement.id,
                     text=requirement.skill,
+                    importance=requirement.importance,
                     score=candidate["score"],
                     confidence=candidate["confidence"],
                     technology_evidence=[],
@@ -257,6 +258,7 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
             )
         )
     items.sort(key=lambda item: item.bullets[0].score, reverse=True)
+    _recommend(items)
 
     requirement_matches = [
         _requirement_result(requirement, bool(source_ids_by_requirement[requirement.id]))
@@ -269,3 +271,41 @@ async def match_jd(user_id: UUID, jd_id: UUID, max_bullets_per_item: int = 4) ->
         requirements=requirement_matches,
         items=items,
     )
+
+
+def _recommend(items: list[MatchedItem]) -> None:
+    candidates = sorted(
+        (
+            (item, bullet)
+            for item in items
+            for bullet in item.bullets
+            if bullet.confidence == "strong"
+        ),
+        key=lambda row: (
+            not any(requirement.importance == "required" for requirement in row[1].requirements),
+            -row[1].score,
+            str(row[0].id),
+            str(row[1].bullet_point_id or row[1].skill_bank_item_id),
+        ),
+    )
+    item_limits = {"experience": 2, "project": 2, "education": 1, "certification": 1}
+    selected_items: dict[str, set[UUID]] = {kind: set() for kind in item_limits}
+    selected_bullets: dict[UUID, int] = {}
+    selected_skills = 0
+    for item, bullet in candidates:
+        if item.type == "skill":
+            if bullet.skill_bank_item_id is None or selected_skills >= 12:
+                continue
+            bullet.recommended = True
+            selected_skills += 1
+            continue
+        if item.type not in item_limits:
+            continue
+        item_ids = selected_items[item.type]
+        if item.id not in item_ids and len(item_ids) >= item_limits[item.type]:
+            continue
+        if selected_bullets.get(item.id, 0) >= 2:
+            continue
+        bullet.recommended = True
+        item_ids.add(item.id)
+        selected_bullets[item.id] = selected_bullets.get(item.id, 0) + 1

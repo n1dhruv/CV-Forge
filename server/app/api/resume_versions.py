@@ -81,7 +81,10 @@ async def start_rewrite(
 ) -> RewriteQueued:
     try:
         queued = await resume_versions.queue_rewrite(
-            session, current_user.id, version_id, payload.bullet_point_ids
+            session,
+            current_user.id,
+            version_id,
+            [(selection.kind, selection.id) for selection in payload.selections],
         )
     except resume_versions.InvalidResumeVersionStateError as exc:
         raise HTTPException(status_code=409, detail="Resume version is not a draft") from exc
@@ -97,7 +100,7 @@ async def start_rewrite(
             str(version.id),
             str(job.id),
             str(current_user.id),
-            [str(value) for value in payload.bullet_point_ids],
+            [str(selection.id) for selection in payload.selections if selection.kind == "bullet"],
             _job_id=str(job.id),
         )
         if result is None:

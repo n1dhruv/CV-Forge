@@ -2,9 +2,11 @@
 \usepackage[margin=0.65in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
 \pagenumbering{gobble}
 \setlength{\parindent}{0pt}
 \setlist[itemize]{leftmargin=*,nosep}
 \begin{document}
+$header
 $sections
 \end{document}

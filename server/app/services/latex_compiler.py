@@ -6,10 +6,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
 
+from pypdf import PdfReader
+
 
 @dataclass(frozen=True)
 class CompileDiagnostic:
-    kind: Literal["syntax", "timeout", "internal"]
+    kind: Literal["syntax", "timeout", "layout", "internal"]
     message: str
     line: int | None = None
 
@@ -33,7 +35,9 @@ def parse_diagnostics(output: str) -> CompileDiagnostic:
     )
 
 
-def compile_latex(source: str, binary_path: str, timeout_seconds: int) -> bytes:
+def compile_latex(
+    source: str, binary_path: str, timeout_seconds: int, enforce_one_page: bool = True
+) -> bytes:
     with TemporaryDirectory() as directory:
         workdir = Path(directory)
         source_path = workdir / "resume.tex"
@@ -74,4 +78,7 @@ def compile_latex(source: str, binary_path: str, timeout_seconds: int) -> bytes:
         if result.returncode or not pdf_path.is_file() or not pdf_path.stat().st_size:
             output = (result.stderr + "\n" + result.stdout)[-20_000:]
             raise CompilationError(parse_diagnostics(output))
-        return pdf_path.read_bytes()
+        pdf = pdf_path.read_bytes()
+        if enforce_one_page and len(PdfReader(pdf_path).pages) != 1:
+            raise CompilationError(CompileDiagnostic("layout", "Resume must fit exactly one page"))
+        return pdf
