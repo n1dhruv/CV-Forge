@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import CheckConstraint, Date, ForeignKey, Integer, Text, text as sql_text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -25,6 +25,13 @@ class SkillBankItem(TimestampMixin, Base):
             "source in ('manual','resume_import','github')",
             name="skill_bank_items_source_check",
         ),
+        CheckConstraint(
+            "jsonb_typeof(links) = 'array' AND jsonb_array_length(links) <= 2 AND ("
+            "type = 'project' OR "
+            "type = 'certification' AND jsonb_array_length(links) <= 1 OR "
+            "type NOT IN ('project','certification') AND links = '[]'::jsonb)",
+            name="skill_bank_items_links_check",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -39,6 +46,9 @@ class SkillBankItem(TimestampMixin, Base):
     raw_text: Mapped[str | None] = mapped_column(Text)
     skill_category: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=sql_text("'{}'::text[]"))
+    links: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, default=list, server_default=sql_text("'[]'::jsonb")
+    )
     source: Mapped[str] = mapped_column(Text, server_default=sql_text("'manual'"))
     user: Mapped["User"] = relationship(back_populates="skill_bank_items")
     bullet_points: Mapped[list["BulletPoint"]] = relationship(

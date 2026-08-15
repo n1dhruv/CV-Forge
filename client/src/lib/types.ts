@@ -12,6 +12,8 @@ export interface BulletPoint {
   updated_at: string
 }
 
+export interface ItemLink { label: string; url: string }
+
 export interface SkillBankItem {
   id: string
   user_id: string
@@ -22,6 +24,7 @@ export interface SkillBankItem {
   end_date: string | null
   raw_text: string | null
   tags: string[]
+  links: ItemLink[]
   skill_category: string | null
   source?: 'manual' | 'resume_import' | 'github'
   created_at: string
@@ -29,8 +32,9 @@ export interface SkillBankItem {
 }
 
 export interface SkillBankItemDetail extends SkillBankItem { bullet_points: BulletPoint[] }
-export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags' | 'skill_category'>>
+export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags' | 'links' | 'skill_category'>>
 export type BulletPointInput = Pick<BulletPoint, 'text'> & Partial<Pick<BulletPoint, 'tags' | 'metrics' | 'display_order'>>
+export interface ReembedQueued { items_queued: number; bullets_queued: number; failed: number }
 
 export interface JDTechnologyRequirement {
   requirement: string
@@ -65,23 +69,15 @@ export interface LLMSettings {
   provider: string
   model: string
   masked_key: string
-  embedding_provider?: string | null
-  embedding_model?: string | null
-  masked_embedding_key?: string | null
 }
 export interface LLMSettingsInput {
   provider: string
   model: string
   api_key?: string
-  embedding_provider?: string
-  embedding_model?: string
-  embedding_api_key?: string
 }
 export interface LLMSettingsSaved {
   provider: string
   model: string
-  embedding_provider?: string | null
-  embedding_model?: string | null
 }
 export interface LLMTestResult { success: boolean; error: string | null }
 export type SupportedModels = Record<string, string[]>

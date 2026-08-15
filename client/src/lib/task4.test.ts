@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assistantProposalIsStale, assistantUndoIsAvailable, orderedSelections, profileLinkError } from './task4.ts'
+import { assistantProposalIsStale, assistantUndoIsAvailable, namedLinkError, orderedSelections, profileLinkError } from './task4.ts'
 import type { MatchedItem, MatchedRequirement, RequirementMatch } from './types.ts'
 
 type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends (<Value>() => Value extends Right ? 1 : 2) ? true : false
@@ -19,8 +19,8 @@ const requirement: MatchedRequirement = {
 
 const items: MatchedItem[] = [
   {
-    id: 'experience-1',
-    type: 'experience',
+    id: 'skill-1',
+    type: 'skill',
     title: 'Engineer',
     org: 'Example',
     start_date: null,
@@ -77,11 +77,33 @@ test('manual overrides retain server match order in the rewrite payload', () => 
   )
 })
 
+test('item-level matches from non-skill sources are not sent as skills', () => {
+  const experienceMatch: MatchedItem = {
+    ...items[0],
+    id: 'experience-1',
+    type: 'experience',
+    bullets: [{
+      ...items[0].bullets[1],
+      skill_bank_item_id: 'experience-1',
+      recommended: true,
+    }],
+  }
+
+  assert.deepEqual(orderedSelections([experienceMatch]), [])
+})
+
 test('profile links use the same http and https boundary as the server', () => {
   assert.equal(profileLinkError(''), '')
   assert.equal(profileLinkError('https://example.com/profile'), '')
   assert.equal(profileLinkError('ftp://example.com/profile'), 'Use a complete http:// or https:// URL.')
   assert.equal(profileLinkError('linkedin.com/in/example'), 'Use a complete http:// or https:// URL.')
+})
+
+test('named resume links require both a custom label and a web URL', () => {
+  assert.equal(namedLinkError({ label: '', url: 'https://example.com' }), 'Enter a link name.')
+  assert.equal(namedLinkError({ label: 'Live', url: '' }), 'Enter a link URL.')
+  assert.equal(namedLinkError({ label: 'Live', url: 'github.com/example' }), 'Use a complete http:// or https:// URL.')
+  assert.equal(namedLinkError({ label: 'Live', url: 'https://example.com' }), '')
 })
 
 test('assistant proposals become stale when the editor changes from the captured source', () => {

@@ -4,17 +4,17 @@ export function selectionKey(selection: RewriteSelection) {
   return `${selection.kind}:${selection.id}`
 }
 
-export function matchSelection(bullet: MatchedBullet): RewriteSelection | undefined {
+export function matchSelection(item: MatchedItem, bullet: MatchedBullet): RewriteSelection | undefined {
   return bullet.bullet_point_id
     ? { kind: 'bullet', id: bullet.bullet_point_id }
-    : bullet.skill_bank_item_id
+    : item.type === 'skill' && bullet.skill_bank_item_id
       ? { kind: 'skill', id: bullet.skill_bank_item_id }
       : undefined
 }
 
 export function orderedSelections(items: MatchedItem[], selected?: Set<string>) {
   return items.flatMap(item => item.bullets.flatMap(bullet => {
-    const selection = matchSelection(bullet)
+    const selection = matchSelection(item, bullet)
     if (!selection || (selected ? !selected.has(selectionKey(selection)) : !bullet.recommended)) return []
     return [selection]
   }))
@@ -27,6 +27,12 @@ export function profileLinkError(value: string) {
     if ((url.protocol === 'http:' || url.protocol === 'https:') && url.host) return ''
   } catch {}
   return 'Use a complete http:// or https:// URL.'
+}
+
+export function namedLinkError(link: { label: string; url: string }) {
+  if (!link.label.trim()) return 'Enter a link name.'
+  if (!link.url.trim()) return 'Enter a link URL.'
+  return profileLinkError(link.url.trim())
 }
 
 export function assistantProposalIsStale(capturedSource: string, currentSource: string) {

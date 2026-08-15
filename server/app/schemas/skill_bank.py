@@ -1,11 +1,36 @@
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ItemType = Literal["experience", "project", "skill", "education", "certification"]
 ItemSource = Literal["manual", "resume_import", "github"]
+
+
+class ItemLink(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    label: str = Field(min_length=1, max_length=40)
+    url: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("URL must use http or https")
+        return value
+
+
+def validate_item_links(item_type: ItemType, links: list[ItemLink]) -> list[ItemLink]:
+    if links and item_type not in {"project", "certification"}:
+        raise ValueError("links may be added to only projects and certifications")
+    limit = 2 if item_type == "project" else 1
+    if item_type in {"project", "certification"} and len(links) > limit:
+        raise ValueError(f"{item_type} accepts at most {limit} link{'s' if limit > 1 else ''}")
+    return links
 
 
 class BulletCreate(BaseModel):
@@ -42,6 +67,7 @@ class ItemCreate(BaseModel):
     end_date: date | None = None
     raw_text: str | None = None
     tags: list[str] = Field(default_factory=list)
+    links: list[ItemLink] = Field(default_factory=list)
     skill_category: str | None = Field(default=None, max_length=80)
 
     @field_validator("skill_category", mode="before")
@@ -53,6 +79,7 @@ class ItemCreate(BaseModel):
     def category_only_for_skills(self) -> "ItemCreate":
         if self.type != "skill":
             self.skill_category = None
+        validate_item_links(self.type, self.links)
         return self
 
 
@@ -64,6 +91,7 @@ class ItemUpdate(BaseModel):
     end_date: date | None = None
     raw_text: str | None = None
     tags: list[str] | None = None
+    links: list[ItemLink] | None = None
     skill_category: str | None = Field(default=None, max_length=80)
 
     @field_validator("skill_category", mode="before")
@@ -83,6 +111,7 @@ class ItemRead(BaseModel):
     end_date: date | None
     raw_text: str | None
     tags: list[str]
+    links: list[ItemLink]
     skill_category: str | None
     source: ItemSource
     created_at: datetime
@@ -91,3 +120,9 @@ class ItemRead(BaseModel):
 
 class ItemDetail(ItemRead):
     bullet_points: list[BulletRead]
+
+
+class ReembedQueued(BaseModel):
+    items_queued: int
+    bullets_queued: int
+    failed: int

@@ -33,6 +33,9 @@ def latex_items_from_rows(
                 start_date=item.start_date,
                 end_date=item.end_date,
                 bullets=[],
+                details=item.raw_text,
+                tags=item.tags or [],
+                links=[(link["label"], link["url"]) for link in (item.links or [])],
             )
         grouped[item.id].bullets.append(
             selection.rewritten_text if selection.approved else selection.original_text
@@ -63,6 +66,11 @@ def latex_items_from_rows(
                 start_date=mandatory_education.start_date,
                 end_date=mandatory_education.end_date,
                 bullets=[],
+                details=mandatory_education.raw_text,
+                tags=mandatory_education.tags or [],
+                links=[
+                    (link["label"], link["url"]) for link in (mandatory_education.links or [])
+                ],
             )
         )
     return items

@@ -78,6 +78,69 @@ def test_render_resume_keeps_url_semantics_with_tex_safe_targets() -> None:
     ) in source
 
 
+def test_render_resume_matches_dense_technical_section_order_and_labeled_links() -> None:
+    items = [
+        LatexItem(
+            type="project",
+            title="CV Forge",
+            org=None,
+            start_date=None,
+            end_date=None,
+            bullets=["Built an evidence-backed resume pipeline"],
+            tags=["Python", "FastAPI"],
+            links=[("Live", "https://example.test/cv_forge"), ("GitHub", "https://github.com/a/b")],
+        ),
+        LatexItem(
+            type="skill",
+            title="Python",
+            org=None,
+            start_date=None,
+            end_date=None,
+            bullets=[],
+            category="Languages",
+        ),
+        LatexItem(
+            type="education",
+            title="B.Tech Computer Science",
+            org="Example University",
+            start_date=date(2022, 1, 1),
+            end_date=date(2026, 1, 1),
+            bullets=[],
+            details="CGPA: 7.7 | Coursework: Operating Systems",
+        ),
+    ]
+    profile = LatexProfile(
+        "Dhruv Sharma",
+        "dhruv@example.test",
+        "+91 1234567890",
+        "Jaipur, India",
+        "https://linkedin.com/in/dhruv",
+        "https://github.com/dhruv",
+        None,
+        None,
+    )
+
+    source = render_resume(items, profile)
+
+    assert source.index("Skills") < source.index("Projects") < source.index("Education")
+    assert r"\textbf{DHruv" not in source
+    assert "Dhruv Sharma" in source
+    assert r"\href{https://linkedin.com/in/dhruv}{LinkedIn}" in source
+    assert r"\href{https://example.test/cv\_forge}{Live}" in source
+    assert "Python, FastAPI" in source
+    assert r"CGPA: 7.7 \textbar{} Coursework: Operating Systems" in source
+
+
+def test_render_resume_never_uses_email_as_the_display_name() -> None:
+    source = render_resume(
+        [],
+        LatexProfile(None, "person@example.test", None, None, None, None, None, None),
+    )
+
+    assert r"\LARGE \textbf{person@example.test}" not in source
+    assert "person@example.test" in source
+
+
 def test_parse_diagnostics_extracts_line_and_hides_raw_log() -> None:
     diagnostic = parse_diagnostics("error: Missing } inserted\n  --> resume.tex:42:8")
 

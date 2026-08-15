@@ -1,4 +1,5 @@
 import json
+import re
 from io import BytesIO
 from typing import Any
 from uuid import UUID
@@ -221,6 +222,28 @@ def _diagnostic(error: Exception) -> str:
     return "The response was not valid JSON with a short message and complete TeX source"
 
 
+def _parse_proposal(raw: str) -> AssistantProposal:
+    """Accept JSON-only responses and the Markdown fence some providers add."""
+    candidate = raw.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", candidate, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        candidate = fenced.group(1).strip()
+    try:
+        return AssistantProposal.model_validate_json(candidate)
+    except ValidationError as original:
+        decoder = json.JSONDecoder()
+        for start in (match.start() for match in re.finditer(r"\{", candidate)):
+            try:
+                value, _ = decoder.raw_decode(candidate[start:])
+            except json.JSONDecodeError:
+                continue
+            try:
+                return AssistantProposal.model_validate(value)
+            except ValidationError:
+                continue
+        raise original
+
+
 def _visible_text(pdf: bytes) -> str:
     try:
         return " ".join(
@@ -232,12 +255,20 @@ def _visible_text(pdf: bytes) -> str:
         ) from exc
 
 
+def _contains_visible(visible: str, value: str) -> bool:
+    normalized_visible = " ".join(visible.casefold().split())
+    normalized_value = " ".join(value.casefold().split())
+    compact_visible = "".join(normalized_visible.split())
+    compact_value = "".join(normalized_value.split())
+    return normalized_value in normalized_visible or compact_value in compact_visible
+
+
 def _validate_preservation(pdf: bytes, context: str) -> None:
     try:
         facts = json.loads(context)
     except json.JSONDecodeError:
         return
-    visible = " ".join(_visible_text(pdf).split())
+    visible = _visible_text(pdf)
     profile = facts.get("profile") if isinstance(facts, dict) else None
     if isinstance(profile, dict):
         name = profile.get("full_name") or profile.get("contact_email")
@@ -245,13 +276,15 @@ def _validate_preservation(pdf: bytes, context: str) -> None:
         required_header = [
             value for value in (name, contact_email) if isinstance(value, str) and value
         ]
-        if any(" ".join(value.split()) not in visible for value in required_header):
+        missing = [value for value in required_header if not _contains_visible(visible, value)]
+        if missing:
             raise InvalidAssistantPreservationError(
-                "The proposed TeX must preserve the required header"
+                "The proposed TeX must preserve the required header values: "
+                + ", ".join(missing)
             )
     education = facts.get("primary_education") if isinstance(facts, dict) else None
     if isinstance(education, dict) and isinstance(education.get("title"), str):
-        if " ".join(education["title"].split()) not in visible:
+        if not _contains_visible(visible, education["title"]):
             raise InvalidAssistantPreservationError(
                 "The proposed TeX must preserve the primary education"
             )
@@ -327,7 +360,7 @@ async def propose(
     for attempt in range(2):
         try:
             raw = await llm_client.get_completion(user_id, messages)
-            proposal = AssistantProposal.model_validate_json(raw)
+            proposal = _parse_proposal(raw)
             pdf = await compile_latex_async(
                 proposal.tex_source,
                 settings.tectonic_binary_path,

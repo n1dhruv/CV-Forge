@@ -6,7 +6,7 @@ import type {
   ResumeBulletSelection, ResumeBulletSelectionUpdate, ResumeVersion, RewriteQueued,
   ResumeOperationQueued, ResumeVersionDetail, ResumeVersionHistoryItem,
   ResumeFamily, ResumeMetadataUpdate,
-  AssistantProposal, Profile, ProfileUpdate, RewriteSelection,
+  AssistantProposal, Profile, ProfileUpdate, ReembedQueued, RewriteSelection,
 } from './types'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
@@ -46,15 +46,14 @@ export function createApiClient(getToken: GetToken) {
       createBullet: (itemId: string, bullet: BulletPointInput) => request<BulletPoint>(`/api/skill_bank/items/${itemId}/bullets`, { method: 'POST', body: JSON.stringify(bullet) }),
       updateBullet: (id: string, bullet: Partial<BulletPointInput>) => request<BulletPoint>(`/api/skill_bank/bullets/${id}`, { method: 'PUT', body: JSON.stringify(bullet) }),
       deleteBullet: (id: string) => request<void>(`/api/skill_bank/bullets/${id}`, { method: 'DELETE' }),
+      reembedAll: () => request<ReembedQueued>('/api/skill_bank/items/reembed', { method: 'POST' }),
     },
     llmSettings: {
       get: () => request<LLMSettings>('/api/settings/llm'),
       save: (settings: LLMSettingsInput) => request<LLMSettingsSaved>('/api/settings/llm', { method: 'POST', body: JSON.stringify(settings) }),
       remove: () => request<void>('/api/settings/llm', { method: 'DELETE' }),
       test: () => request<LLMTestResult>('/api/settings/llm/test', { method: 'POST' }),
-      testEmbedding: () => request<LLMTestResult>('/api/settings/llm/test-embedding', { method: 'POST' }),
       supportedModels: () => request<SupportedModels>('/api/settings/llm/supported-models'),
-      supportedEmbeddingModels: () => request<SupportedModels>('/api/settings/llm/supported-embedding-models'),
     },
     jd: {
       parseText: (rawText: string) => request<JDParseQueued>('/api/jd/parse', { method: 'POST', body: JSON.stringify({ raw_text: rawText }) }),

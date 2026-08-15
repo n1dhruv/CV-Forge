@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(alias="REDIS_URL")
     encryption_key: SecretStr = Field(alias="ENCRYPTION_KEY")
-    embedding_model: str = Field(alias="EMBEDDING_MODEL")
     pinecone_api_key: SecretStr = Field(alias="PINECONE_API_KEY", min_length=1)
     pinecone_index_name: str = Field(alias="PINECONE_INDEX_NAME", min_length=1)
     pinecone_host: str = Field(alias="PINECONE_HOST", min_length=1)
@@ -27,6 +26,11 @@ class Settings(BaseSettings):
     openrouter_rerank_model: str = Field(
         default="nvidia/llama-nemotron-rerank-vl-1b-v2:free",
         alias="OPENROUTER_RERANK_MODEL",
+        min_length=1,
+    )
+    openrouter_fallback_model: str = Field(
+        default="nvidia/nemotron-3.5-lightning:free",
+        alias="OPENROUTER_FALLBACK_MODEL",
         min_length=1,
     )
     github_client_id: str = Field(alias="GITHUB_CLIENT_ID")

@@ -43,6 +43,35 @@ def test_assembly_uses_approved_and_reverted_text_and_groups_items() -> None:
     assert result[0].bullets == ["Approved rewrite", "Original kept"]
 
 
+def test_assembly_keeps_item_details_tags_and_named_links() -> None:
+    item = SkillBankItem(
+        id=uuid4(),
+        user_id=uuid4(),
+        type="project",
+        title="CV Forge",
+        raw_text="Evidence-backed resume builder",
+        tags=["Python", "FastAPI"],
+        links=[{"label": "Live", "url": "https://example.test"}],
+    )
+    selection = ResumeBulletSelection(
+        id=uuid4(),
+        resume_version_id=uuid4(),
+        bullet_point_id=uuid4(),
+        original_text="Built the pipeline",
+        rewritten_text="Built the pipeline",
+        approved=False,
+        resolved=True,
+        flagged_terms=[],
+        section_order=0,
+    )
+
+    result = latex_items_from_rows([(selection, item)])
+
+    assert result[0].details == "Evidence-backed resume builder"
+    assert result[0].tags == ["Python", "FastAPI"]
+    assert result[0].links == [("Live", "https://example.test")]
+
+
 def test_assembly_rejects_unresolved_selection() -> None:
     item = SkillBankItem(id=uuid4(), user_id=uuid4(), type="project", title="Project")
     selection = ResumeBulletSelection(

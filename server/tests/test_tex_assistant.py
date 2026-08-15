@@ -197,6 +197,27 @@ async def test_invalid_schema_gets_one_correction_attempt(monkeypatch) -> None:
     assert "valid JSON" in completion.await_args.args[1][-1]["content"]
 
 
+async def test_fenced_json_proposal_is_accepted(monkeypatch) -> None:
+    resume = version()
+    monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=resume))
+    monkeypatch.setattr(tex_assistant, "build_context", AsyncMock(return_value="facts"))
+    fenced = f"```json\n{json.dumps({'message': 'Fixed spacing.', 'tex_source': source()})}\n```"
+    monkeypatch.setattr(tex_assistant.llm_client, "get_completion", AsyncMock(return_value=fenced))
+    monkeypatch.setattr(
+        tex_assistant, "compile_latex_async", AsyncMock(return_value=b"%PDF-1.4")
+    )
+
+    result = await resume_versions_api.propose_tex(
+        resume.id,
+        request(),
+        MagicMock(),
+        type("User", (), {"id": resume.user_id})(),
+        MagicMock(tectonic_binary_path="tectonic", latex_compile_timeout_seconds=30),
+    )
+
+    assert result.message == "Fixed spacing."
+
+
 async def test_compile_failure_gets_one_diagnostic_correction_attempt(monkeypatch) -> None:
     resume = version()
     monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=resume))
@@ -580,6 +601,33 @@ async def test_proposal_preserving_required_header_and_education_passes(monkeypa
 
     assert proposal.tex_source == preserved_source()
     assert completion.await_count == 1
+
+
+def test_preservation_allows_pdf_extraction_whitespace_in_header(monkeypatch) -> None:
+    context = json.dumps(
+        {"profile": {"full_name": "Dhruv Sharma", "contact_email": "dhruv@example.com"}}
+    )
+
+    monkeypatch.setattr(
+        tex_assistant,
+        "PdfReader",
+        lambda _: rendered_pdf("Dhruv Sharma dhruv @ example.com"),
+        raising=False,
+    )
+    tex_assistant._validate_preservation(b"%PDF-1.4", context)
+
+
+def test_preservation_allows_rendered_header_case_changes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tex_assistant,
+        "PdfReader",
+        lambda _: rendered_pdf("DHRUV SHARMA DHRUV @ EXAMPLE.COM"),
+        raising=False,
+    )
+    tex_assistant._validate_preservation(
+        b"%PDF-1.4",
+        json.dumps({"profile": {"full_name": "Dhruv Sharma", "contact_email": "dhruv@example.com"}}),
+    )
 
 
 @pytest.mark.parametrize(

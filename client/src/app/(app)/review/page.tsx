@@ -220,13 +220,13 @@ function MatchedSource({ item, index, selected, onToggle }: { item: MatchedItem;
       
       <ol className="divide-y border-t lg:border-t-0 lg:border-l lg:pl-10">
         {item.bullets.map(bullet => {
-          const selection = matchSelection(bullet)!
+          const selection = matchSelection(item, bullet)
           return (
           <MatchedEvidence
-            key={selectionKey(selection)}
+            key={selection ? selectionKey(selection) : `evidence:${item.id}`}
             bullet={bullet}
-            selected={selected.has(selectionKey(selection))}
-            onToggle={() => onToggle(selection)}
+            selected={selection ? selected.has(selectionKey(selection)) : false}
+            onToggle={selection ? () => onToggle(selection) : undefined}
           />
           )
         })}
@@ -235,15 +235,15 @@ function MatchedSource({ item, index, selected, onToggle }: { item: MatchedItem;
   )
 }
 
-function MatchedEvidence({ bullet, selected, onToggle }: { bullet: MatchedBullet; selected: boolean; onToggle: () => void }) {
+function MatchedEvidence({ bullet, selected, onToggle }: { bullet: MatchedBullet; selected: boolean; onToggle?: () => void }) {
   const strong = bullet.confidence === 'strong'
   
   return (
     <li className="grid gap-4 py-6 sm:grid-cols-[2.5rem_minmax(0,1fr)] first:pt-4 lg:first:pt-0 last:pb-0">
-      <label className="flex min-h-11 min-w-11 cursor-pointer items-start justify-center pt-1" aria-label={`Select ${bullet.skill_bank_item_id ? 'skill' : 'proof point'}: ${bullet.text}`}>
+      {onToggle ? <label className="flex min-h-11 min-w-11 cursor-pointer items-start justify-center pt-1" aria-label={`Select ${bullet.skill_bank_item_id ? 'skill' : 'proof point'}: ${bullet.text}`}>
           <input className="mt-0.5 size-4 accent-accent" type="checkbox" checked={selected} onChange={onToggle} />
           <span className="sr-only">Select {bullet.skill_bank_item_id ? 'skill' : 'proof point'}: {bullet.text}</span>
-        </label>
+        </label> : <span aria-hidden="true" />}
       <div>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider ${

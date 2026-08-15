@@ -13,6 +13,9 @@ class LatexItem:
     end_date: date | None
     bullets: list[str]
     category: str | None = None
+    details: str | None = None
+    tags: list[str] | None = None
+    links: list[tuple[str, str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -38,11 +41,12 @@ _ESCAPES = {
     "_": r"\_",
     "~": r"\textasciitilde{}",
     "^": r"\textasciicircum{}",
+    "|": r"\textbar{}",
 }
 _SECTION_NAMES = {
+    "skill": "Skills",
     "experience": "Experience",
     "project": "Projects",
-    "skill": "Skills",
     "education": "Education",
     "certification": "Certifications",
 }
@@ -63,14 +67,38 @@ def _date(value: date | None) -> str:
     return value.strftime("%b %Y") if value else ""
 
 
+def _dates(item: LatexItem) -> str:
+    if item.start_date:
+        return f"{_date(item.start_date)} -- {_date(item.end_date) or 'Present'}"
+    return _date(item.end_date)
+
+
+def _render_links(item: LatexItem) -> str:
+    return " ".join(
+        rf"[\href{{{_tex_safe_url(url)}}}{{{escape_latex(label)}}}]"
+        for label, url in item.links or []
+    )
+
+
 def _render_item(item: LatexItem) -> str:
-    heading = escape_latex(item.title)
-    if item.org:
-        heading += rf" \hfill {escape_latex(item.org)}"
-    dates = " -- ".join(value for value in (_date(item.start_date), _date(item.end_date)) if value)
-    if dates:
-        heading += rf" \\ {escape_latex(dates)}"
-    rows = [rf"\textbf{{{heading}}}"]
+    heading = rf"\textbf{{{escape_latex(item.title)}}}"
+    links = _render_links(item)
+    if links:
+        heading += " " + links
+    if item.type == "education" and item.org:
+        heading += ", " + escape_latex(item.org)
+    right = (
+        escape_latex(", ".join(item.tags or []))
+        if item.type == "project" and item.tags
+        else escape_latex(_dates(item))
+    )
+    if right:
+        heading += rf" \hfill {right}"
+    rows = [heading]
+    if item.org and item.type != "education":
+        rows.append(r"\\[-1pt] " + escape_latex(item.org))
+    if item.details:
+        rows.append(r"\\[-1pt] " + escape_latex(item.details))
     if item.bullets:
         rows.extend(
             (
@@ -87,7 +115,7 @@ def _render_skills(items: list[LatexItem]) -> str:
     for item in items:
         groups.setdefault(item.category or "Skills", []).append(escape_latex(item.title))
     return "\n".join(
-        rf"\textbf{{{escape_latex(category)}:}} " + ", ".join(names)
+        rf"\textbf{{{escape_latex(category)}:}} " + ", ".join(names) + r"\par"
         for category, names in groups.items()
     )
 
@@ -95,28 +123,33 @@ def _render_skills(items: list[LatexItem]) -> str:
 def _render_header(profile: LatexProfile | None) -> str:
     if profile is None:
         return ""
-    name = escape_latex(profile.full_name or profile.contact_email or "")
-    contacts = [
-        escape_latex(value)
-        for value in (profile.contact_email, profile.phone, profile.location)
-        if value
-    ]
+    name = escape_latex(profile.full_name or "")
+    contacts = []
+    if profile.phone:
+        contacts.append(escape_latex(profile.phone))
+    if profile.contact_email:
+        contacts.append(
+            rf"\href{{{_tex_safe_url('mailto:' + profile.contact_email)}}}"
+            rf"{{{escape_latex(profile.contact_email)}}}"
+        )
+    if profile.location:
+        contacts.append(escape_latex(profile.location))
     contacts.extend(
-        rf"\href{{{_tex_safe_url(value)}}}{{{escape_latex(value)}}}"
-        for value in (
-            profile.linkedin_url,
-            profile.github_url,
-            profile.leetcode_url,
-            profile.portfolio_url,
+        rf"\href{{{_tex_safe_url(value)}}}{{{label}}}"
+        for label, value in (
+            ("LinkedIn", profile.linkedin_url),
+            ("Portfolio", profile.portfolio_url),
+            ("GitHub", profile.github_url),
+            ("LeetCode", profile.leetcode_url),
         )
         if value
     )
     rows = []
     if name:
-        rows.append(rf"\centerline{{\LARGE \textbf{{{name}}}}}")
+        rows.append(rf"{{\Large\bfseries\MakeUppercase{{{name}}}}}")
     if contacts:
-        rows.append("\\\\\n".join(contacts))
-    return "\n".join(rows)
+        rows.append(r"\\[2pt] " + r" \textbar\ ".join(contacts))
+    return "\n".join((r"\begin{center}", *rows, r"\end{center}"))
 
 
 def render_resume(items: list[LatexItem], profile: LatexProfile | None = None) -> str:
@@ -127,7 +160,7 @@ def render_resume(items: list[LatexItem], profile: LatexProfile | None = None) -
             content = _render_skills(rows) if item_type == "skill" else "\n".join(
                 _render_item(item) for item in rows
             )
-            sections.append(rf"\section*{{{title}}}" + "\n" + content)
+            sections.append(rf"\resumesection{{\MakeUppercase{{{title}}}}}" + "\n" + content)
     return Template(_TEMPLATE.read_text()).substitute(
         header=_render_header(profile), sections="\n".join(sections)
     )
