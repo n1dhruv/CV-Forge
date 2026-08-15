@@ -12,7 +12,7 @@ from app.models.jobs import BackgroundJob
 from app.models.resume import JDRequirement, JobDescription
 from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
-from app.schemas.match import MatchResult, MatchedBullet
+from app.schemas.match import MatchResult, MatchedBullet, MatchedItem, MatchedRequirement
 from app.services import llm_client, matcher, vector_store
 from app.workers import match as match_worker
 
@@ -258,6 +258,38 @@ async def test_rerank_score_threshold_and_confidence_bands(monkeypatch) -> None:
         for bullet in item.bullets
     }
     assert confidences == {bullets[0].id: "strong", bullets[1].id: "moderate"}
+    recommended = {
+        bullet.bullet_point_id: bullet.recommended
+        for item in result.items
+        for bullet in item.bullets
+    }
+    assert recommended == {bullets[0].id: True, bullets[1].id: False}
+
+
+def test_recommendations_prioritize_required_matches_and_cap_experience_items() -> None:
+    def item(score: float, importance: str) -> MatchedItem:
+        bullet = MatchedBullet(
+            bullet_point_id=uuid4(),
+            text="Evidence",
+            score=score,
+            confidence="strong",
+            requirements=[
+                MatchedRequirement(
+                    id=uuid4(), text="Requirement", importance=importance, score=score,
+                    confidence="strong", technology_evidence=[]
+                )
+            ],
+        )
+        return MatchedItem(id=uuid4(), type="experience", title="Role", org=None, start_date=None, end_date=None, bullets=[bullet])
+
+    required_low, required_high, nice_high = item(0.7, "required"), item(0.8, "required"), item(0.99, "nice_to_have")
+    matcher._recommend([nice_high, required_low, required_high])
+
+    assert [row.bullets[0].recommended for row in (required_low, required_high, nice_high)] == [
+        True,
+        True,
+        False,
+    ]
 
 
 async def test_matching_foreign_jd_returns_none(monkeypatch) -> None:

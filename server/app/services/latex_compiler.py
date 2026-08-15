@@ -1,3 +1,4 @@
+import asyncio
 import re
 import os
 import subprocess
@@ -6,10 +7,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
 
+from pypdf import PdfReader
+
 
 @dataclass(frozen=True)
 class CompileDiagnostic:
-    kind: Literal["syntax", "timeout", "internal"]
+    kind: Literal["syntax", "timeout", "layout", "internal"]
     message: str
     line: int | None = None
 
@@ -33,7 +36,20 @@ def parse_diagnostics(output: str) -> CompileDiagnostic:
     )
 
 
-def compile_latex(source: str, binary_path: str, timeout_seconds: int) -> bytes:
+def _validate_pdf(pdf_path: Path, enforce_one_page: bool) -> None:
+    try:
+        page_count = len(PdfReader(pdf_path).pages)
+    except Exception as exc:
+        raise CompilationError(
+            CompileDiagnostic("internal", "The compiled PDF could not be validated")
+        ) from exc
+    if enforce_one_page and page_count != 1:
+        raise CompilationError(CompileDiagnostic("layout", "Resume must fit exactly one page"))
+
+
+def compile_latex(
+    source: str, binary_path: str, timeout_seconds: int, enforce_one_page: bool = True
+) -> bytes:
     with TemporaryDirectory() as directory:
         workdir = Path(directory)
         source_path = workdir / "resume.tex"
@@ -74,4 +90,60 @@ def compile_latex(source: str, binary_path: str, timeout_seconds: int) -> bytes:
         if result.returncode or not pdf_path.is_file() or not pdf_path.stat().st_size:
             output = (result.stderr + "\n" + result.stdout)[-20_000:]
             raise CompilationError(parse_diagnostics(output))
-        return pdf_path.read_bytes()
+        pdf = pdf_path.read_bytes()
+        _validate_pdf(pdf_path, enforce_one_page)
+        return pdf
+
+
+async def compile_latex_async(
+    source: str, binary_path: str, timeout_seconds: int, enforce_one_page: bool = True
+) -> bytes:
+    with TemporaryDirectory() as directory:
+        workdir = Path(directory)
+        source_path = workdir / "resume.tex"
+        source_path.write_text(source, encoding="utf-8")
+        command = [
+            binary_path,
+            "--untrusted",
+            "--keep-logs",
+            "--outdir",
+            str(workdir),
+            str(source_path),
+        ]
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=workdir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={
+                    **os.environ,
+                    "SOURCE_DATE_EPOCH": "0",
+                    "TECTONIC_UNTRUSTED_MODE": "1",
+                },
+            )
+        except OSError as exc:
+            raise CompilationError(
+                CompileDiagnostic("internal", "The LaTeX compiler is unavailable")
+            ) from exc
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_seconds
+            )
+        except TimeoutError as exc:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.communicate()
+            raise CompilationError(
+                CompileDiagnostic("timeout", "LaTeX compilation timed out")
+            ) from exc
+
+        pdf_path = workdir / "resume.pdf"
+        if process.returncode or not pdf_path.is_file() or not pdf_path.stat().st_size:
+            output = (stderr + b"\n" + stdout)[-20_000:].decode(errors="replace")
+            raise CompilationError(parse_diagnostics(output))
+        pdf = pdf_path.read_bytes()
+        _validate_pdf(pdf_path, enforce_one_page)
+        return pdf

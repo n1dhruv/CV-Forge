@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Settings,
   Sun,
+  UserRound,
   X,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -24,10 +25,12 @@ import { ApiError } from '@/lib/api'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/hooks/useAuth'
 import { DURATION, EASE } from '@/lib/motion'
-import { useEffect } from 'react'
+import { ProfileEditor } from '@/components/ProfileEditor'
+import { useEffect, useState } from 'react'
 
 const nav = [
   ['/dashboard', 'Dashboard', LayoutDashboard],
+  ['/profile', 'Profile', UserRound],
   ['/skill-bank', 'Skill bank', BookOpen],
   ['/resume-import', 'Import resume', FileUp],
   ['/job-description', 'Job descriptions', FileInput],
@@ -44,6 +47,7 @@ export default function AppLayout({
   const { user, session, loading, signOut } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
+  const [profileOpen, setProfileOpen] = useState(false)
   
   const api = useApi()
   const queryClient = useQueryClient()
@@ -51,7 +55,7 @@ export default function AppLayout({
 
   useEffect(() => {
     if (!loading && !session) {
-      router.replace('/auth')
+      router.replace('/sign-in')
     }
   }, [loading, session, router])
 
@@ -62,6 +66,18 @@ export default function AppLayout({
       error instanceof ApiError && error.status === 404 ? false : count < 1,
     enabled: !!session,
   })
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: api.profile.get,
+    enabled: !!session,
+  })
+
+  useEffect(() => {
+    if (!profileOpen) return
+    const close = (event: KeyboardEvent) => event.key === 'Escape' && setProfileOpen(false)
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [profileOpen])
 
   if (loading || !session) {
     return (
@@ -73,7 +89,7 @@ export default function AppLayout({
 
   const missing = !llmSettings && llmError instanceof ApiError && llmError.status === 404
   const name =
-    user?.user_metadata.full_name ??
+    profile?.full_name ?? user?.user_metadata.full_name ??
     user?.user_metadata.name ??
     user?.user_metadata.user_name ??
     'Your workspace'
@@ -182,19 +198,18 @@ export default function AppLayout({
           </button>
 
           {/* User info */}
-          <div className="mt-2 flex items-center gap-3 rounded-md px-3 py-2">
-            <div
-              className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-bold text-accent"
-              aria-hidden="true"
-            >
-              {String(name).slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{String(name)}</p>
-              <p className="truncate text-xs text-muted">{email}</p>
-            </div>
+          <div className="mt-2 flex items-center gap-1 rounded-md px-1 py-1">
+            <button className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-2 py-1 text-left transition-colors hover:bg-surface" aria-haspopup="dialog" onClick={() => setProfileOpen(true)}>
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-bold text-accent" aria-hidden="true">
+                {String(name).slice(0, 1).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">{String(name)}</span>
+                <span className="block truncate text-xs text-muted">{email}</span>
+              </span>
+            </button>
             <button
-              className="text-muted transition-colors hover:text-ink"
+              className="button-ghost !px-2 text-muted"
               aria-label="Sign out"
               title="Sign out"
               onClick={() => void signOut()}
@@ -242,6 +257,33 @@ export default function AppLayout({
         )}
         {children}
       </main>
+
+      <AnimatePresence>
+        {profileOpen ? (
+          <div className="fixed inset-0 z-50 grid place-items-center p-4 sm:p-8">
+            <motion.button className="absolute inset-0 bg-ink/35" aria-label="Close profile" onClick={() => setProfileOpen(false)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+            <motion.section
+              aria-labelledby="profile-dialog-title"
+              aria-modal="true"
+              className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-surface shadow-2xl"
+              initial={{ opacity: 0, y: 14, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.99 }}
+              role="dialog"
+              transition={{ duration: DURATION.normal, ease: EASE.outExpo }}
+            >
+              <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-surface px-5 py-4 sm:px-7">
+                <div>
+                  <h2 className="font-display text-2xl font-medium" id="profile-dialog-title">Resume profile</h2>
+                  <p className="mt-1 text-sm text-muted">Choose the name and contact links shown in your resume header.</p>
+                </div>
+                <button className="button-ghost !px-2.5" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={18} aria-hidden="true" /></button>
+              </header>
+              <div className="p-5 sm:p-7"><ProfileEditor autoFocus onSaved={() => setProfileOpen(false)} /></div>
+            </motion.section>
+          </div>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }

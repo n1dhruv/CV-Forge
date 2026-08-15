@@ -1,10 +1,10 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { usePathname, useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageHeader } from '@/components/PageHeader'
 import { ScreenState } from '@/components/ScreenState'
@@ -12,6 +12,7 @@ import { useApi } from '@/hooks/useApi'
 import { Reveal } from '@/components/motion/Reveal'
 import { Stagger, StaggerItem } from '@/components/motion/Stagger'
 import { DURATION, EASE } from '@/lib/motion'
+import { namedLinkError } from '@/lib/task4'
 import type { BulletPoint, BulletPointInput, ItemType, SkillBankItem, SkillBankItemInput } from '@/lib/types'
 
 const labels: Record<ItemType, string> = { experience: 'Experience', project: 'Projects', skill: 'Skills', education: 'Education', certification: 'Certifications' }
@@ -30,7 +31,6 @@ const formatDate = (value: string | null) => (value ? date.format(new Date(`${va
 export default function SkillBank() {
   const api = useApi()
   const queryClient = useQueryClient()
-  const pathname = usePathname()
   const params = useSearchParams()
   const router = useRouter()
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -60,6 +60,8 @@ export default function SkillBank() {
     },
   })
 
+  const reembed = useMutation({ mutationFn: api.skillBank.reembedAll })
+
   if (items.isPending) {
     return (
       <div className="container-normal py-10 md:py-12">
@@ -85,12 +87,34 @@ export default function SkillBank() {
         title="Skill Bank"
         description="Store the facts once. Tag each proof point so matching stays precise."
         action={
-          <button className="button-primary" onClick={() => setEditing('new')}>
-            <Plus size={16} aria-hidden="true" />
-            Add {singular[tab]}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              className="button-secondary"
+              disabled={!items.data.length || reembed.isPending}
+              onClick={() => reembed.mutate()}
+            >
+              <RefreshCw size={16} className={reembed.isPending ? 'animate-spin' : ''} aria-hidden="true" />
+              {reembed.isPending ? 'Queuing…' : 'Re-embed all'}
+            </button>
+            <button className="button-primary" onClick={() => setEditing('new')}>
+              <Plus size={16} aria-hidden="true" />
+              Add {singular[tab]}
+            </button>
+          </div>
         }
       />
+
+      {reembed.isSuccess ? (
+        <div className={`mb-8 flex items-start gap-3 border-y py-4 text-sm ${reembed.data.failed ? 'text-warning' : 'text-success'}`} role="status" aria-live="polite">
+          <Check size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p><strong>Re-embedding queued.</strong> {reembed.data.items_queued} items and {reembed.data.bullets_queued} bullet points will be refreshed.{reembed.data.failed ? ` ${reembed.data.failed} could not be queued; retry to pick them up.` : ''}</p>
+        </div>
+      ) : reembed.isError ? (
+        <div className="mb-8 flex items-start gap-3 border-y py-4 text-sm text-danger" role="alert">
+          <RefreshCw size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p><strong>Couldn’t queue re-embedding.</strong> {reembed.error.message}</p>
+        </div>
+      ) : null}
 
       <Reveal variant="down" delay={0.1}>
         <AnimatePresence>
@@ -279,6 +303,15 @@ function ItemRow({ item, highlighted, open, onToggle, onEdit }: { item: SkillBan
                   <p className="mb-8 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-muted">
                     {detail.data.raw_text || 'No supporting notes.'}
                   </p>
+                  {detail.data.links.length ? (
+                    <div className="mb-8 flex flex-wrap gap-2" aria-label="Saved links">
+                      {detail.data.links.map(link => (
+                        <a className="button-ghost" href={link.url} key={`${link.label}:${link.url}`} rel="noreferrer" target="_blank">
+                          {link.label}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                   
                   <BulletList itemId={item.id} bullets={[...detail.data.bullet_points].sort((a, b) => a.display_order - b.display_order)} />
                   
@@ -321,9 +354,12 @@ function ItemForm({ initial, type, pending, error, onClose, onSave }: { initial?
   const [endDate, setEndDate] = useState(initial?.end_date ?? '')
   const [ongoing, setOngoing] = useState(initial ? !initial.end_date : false)
   const [rawText, setRawText] = useState(initial?.raw_text ?? '')
+  const [links, setLinks] = useState(initial?.links ?? [])
 
   const copy = formCopy[itemType]
   const compact = itemType === 'skill'
+  const linkLimit = itemType === 'project' ? 2 : itemType === 'certification' ? 1 : 0
+  const invalidLinks = links.some(link => namedLinkError(link))
 
   return (
     <form
@@ -331,7 +367,8 @@ function ItemForm({ initial, type, pending, error, onClose, onSave }: { initial?
       className="rounded-xl border bg-surface shadow-2xl"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave({ type: itemType, title: title.trim(), org: compact ? null : org.trim() || null, start_date: compact ? null : startDate || null, end_date: compact || ongoing ? null : endDate || null, raw_text: rawText.trim() || null, tags: initial?.tags ?? [] })
+        if (invalidLinks) return
+        onSave({ type: itemType, title: title.trim(), org: compact ? null : org.trim() || null, start_date: compact ? null : startDate || null, end_date: compact || ongoing ? null : endDate || null, raw_text: rawText.trim() || null, tags: initial?.tags ?? [], links: linkLimit ? links.map(link => ({ label: link.label.trim(), url: link.url.trim() })) : [] })
       }}
     >
       <header className="flex items-center justify-between border-b px-5 py-4 sm:px-6">
@@ -349,7 +386,11 @@ function ItemForm({ initial, type, pending, error, onClose, onSave }: { initial?
       <div className="grid gap-6 px-5 py-6 sm:grid-cols-2 sm:px-6">
         <label className="text-sm font-semibold" htmlFor="item-type">
           Evidence type
-          <select id="item-type" name="type" className="field mt-2" value={itemType} onChange={(event) => setItemType(event.target.value as ItemType)}>
+          <select id="item-type" name="type" className="field mt-2" value={itemType} onChange={(event) => {
+            const nextType = event.target.value as ItemType
+            setItemType(nextType)
+            setLinks(current => current.slice(0, nextType === 'project' ? 2 : nextType === 'certification' ? 1 : 0))
+          }}>
             {types.map((value) => (
               <option value={value} key={value}>{labels[value]}</option>
             ))}
@@ -385,13 +426,55 @@ function ItemForm({ initial, type, pending, error, onClose, onSave }: { initial?
           Source notes <span className="font-normal text-muted">(optional)</span>
           <textarea id="raw-text" name="raw-text" className="field mt-2 min-h-24 resize-y py-3 leading-relaxed" value={rawText} onChange={(event) => setRawText(event.target.value)} placeholder={copy.notesPlaceholder} />
         </label>
+
+        {linkLimit ? (
+          <section className="sm:col-span-2" aria-labelledby="item-links-title">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold" id="item-links-title">Links <span className="font-normal text-muted">(optional)</span></h3>
+                <p className="mt-1 text-xs text-muted">Add a custom name and complete URL. Maximum {linkLimit}.</p>
+              </div>
+              <button
+                className="button-secondary"
+                disabled={links.length >= linkLimit}
+                onClick={() => setLinks(current => [...current, { label: '', url: '' }])}
+                type="button"
+              >
+                <Plus size={15} aria-hidden="true" /> Add link
+              </button>
+            </div>
+            {links.length ? (
+              <div className="mt-4 space-y-4">
+                {links.map((link, index) => {
+                  const linkError = namedLinkError(link)
+                  return (
+                    <div className="grid gap-3 rounded-xl bg-raised p-4 sm:grid-cols-[0.7fr_1.3fr_auto]" key={index}>
+                      <label className="text-xs font-semibold" htmlFor={`item-link-label-${index}`}>
+                        Link name
+                        <input id={`item-link-label-${index}`} className="field mt-2 bg-canvas" maxLength={40} placeholder="Live, GitHub, Paper…" required value={link.label} onChange={event => setLinks(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, label: event.target.value } : row))} />
+                      </label>
+                      <label className="text-xs font-semibold" htmlFor={`item-link-url-${index}`}>
+                        URL
+                        <input id={`item-link-url-${index}`} className="field mt-2 bg-canvas" placeholder="https://…" required type="url" value={link.url} onChange={event => setLinks(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, url: event.target.value } : row))} />
+                      </label>
+                      <button className="button-ghost self-end !px-3" aria-label={`Remove link ${index + 1}`} onClick={() => setLinks(current => current.filter((_, rowIndex) => rowIndex !== index))} type="button">
+                        <Trash2 size={16} aria-hidden="true" />
+                      </button>
+                      {linkError && link.label && link.url ? <p className="text-xs text-danger sm:col-span-3" role="alert">{linkError}</p> : null}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
         
         {error && <p className="text-sm text-danger sm:col-span-2" role="alert">{error}</p>}
       </div>
 
       <footer className="flex flex-wrap justify-end gap-3 border-t bg-raised/50 px-5 py-4 sm:px-6 rounded-b-xl">
         <button type="button" className="button-ghost" onClick={onClose}>Cancel</button>
-        <button className="button-primary" disabled={pending || !title.trim()}>
+        <button className="button-primary" disabled={pending || !title.trim() || invalidLinks}>
           <Save size={16} aria-hidden="true" /> {pending ? 'Saving…' : `Save ${singular[itemType]}`}
         </button>
       </footer>

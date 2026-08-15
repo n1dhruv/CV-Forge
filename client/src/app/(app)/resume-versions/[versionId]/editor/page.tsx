@@ -7,11 +7,13 @@ import dynamic from 'next/dynamic'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ScreenState } from '@/components/ScreenState'
+import { AssistantDock } from '@/components/resume/AssistantDock'
 import { useApi } from '@/hooks/useApi'
 import { useBackgroundJobStatus } from '@/hooks/useBackgroundJobStatus'
 import { useUI } from '@/store/ui'
 import { downloadPdf, shouldShowCompileDiagnostics, validDiagnosticLine } from '@/lib/resume-editor'
-import type { CompileDiagnostic, ResumeMetadataUpdate, ResumeVersionDetail } from '@/lib/types'
+import { assistantProposalIsStale, assistantUndoIsAvailable } from '@/lib/task4'
+import type { AssistantProposal, CompileDiagnostic, ResumeMetadataUpdate } from '@/lib/types'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 const PdfPreview = dynamic(() => import('@/components/resume/PdfPreview'), { ssr: false })
@@ -38,6 +40,11 @@ export default function ResumeEditorPage() {
   const [resumeName, setResumeName] = useState('')
   const [downloadError, setDownloadError] = useState<Error>()
   const [downloading, setDownloading] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantInstruction, setAssistantInstruction] = useState('')
+  const [assistantProposal, setAssistantProposal] = useState<(AssistantProposal & { baseSource: string }) | null>(null)
+  const [assistantUndo, setAssistantUndo] = useState<{ previousSource: string; appliedSource: string }>()
+  const [assistantApplied, setAssistantApplied] = useState(false)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null)
 
@@ -156,6 +163,23 @@ export default function ResumeEditorPage() {
     onSuccess: updated => queryClient.setQueryData(['resume-version-detail', versionId], updated),
   })
 
+  const assistant = useMutation({
+    mutationFn: async (instruction: string) => {
+      const baseSource = source
+      if (baseSource !== savedSource) {
+        const saved = await api.resumeVersions.updateTex(versionId, baseSource)
+        setSavedSource(saved.tex_source ?? baseSource)
+        queryClient.setQueryData(['resume-version-detail', versionId], saved)
+      }
+      const proposal = await api.resumeVersions.assistant(versionId, instruction)
+      return { ...proposal, baseSource }
+    },
+    onSuccess: proposal => {
+      setAssistantProposal(proposal)
+      setAssistantApplied(false)
+    },
+  })
+
   const history = useQuery({
     queryKey: ['resume-version-history', versionId],
     queryFn: () => api.resumeVersions.history(versionId),
@@ -226,6 +250,26 @@ export default function ResumeEditorPage() {
     } finally {
       setDownloading(false)
     }
+  }
+  const requestAssistantProposal = () => {
+    const instruction = assistantInstruction.trim()
+    if (!instruction || assistant.isPending) return
+    setAssistantProposal(null)
+    setAssistantApplied(false)
+    assistant.mutate(instruction)
+  }
+  const applyAssistantProposal = () => {
+    if (!assistantProposal || assistantProposalIsStale(assistantProposal.baseSource, source)) return
+    setAssistantUndo({ previousSource: source, appliedSource: assistantProposal.tex_source })
+    setSource(assistantProposal.tex_source)
+    setAssistantProposal(null)
+    setAssistantApplied(true)
+  }
+  const undoAssistantProposal = () => {
+    if (!assistantUndoIsAvailable(assistantUndo?.appliedSource, source) || !assistantUndo) return
+    setSource(assistantUndo.previousSource)
+    setAssistantUndo(undefined)
+    setAssistantApplied(false)
   }
 
   if (detail.isPending) return <div className="container-normal py-12"><ScreenState kind="loading" title="Opening resume editor…" detail="Loading your source and latest PDF." /></div>
@@ -321,6 +365,24 @@ export default function ResumeEditorPage() {
           </div>
         </aside> : null}
       </main>
+      <AssistantDock
+        expanded={assistantOpen}
+        instruction={assistantInstruction}
+        pending={assistant.isPending}
+        error={assistant.error}
+        proposal={assistantProposal}
+        stale={!!assistantProposal && assistantProposalIsStale(assistantProposal.baseSource, source)}
+        applied={assistantApplied}
+        undoAvailable={assistantUndoIsAvailable(assistantUndo?.appliedSource, source)}
+        theme={theme}
+        disabled={busy}
+        onToggle={() => setAssistantOpen(current => !current)}
+        onInstructionChange={setAssistantInstruction}
+        onSubmit={requestAssistantProposal}
+        onApply={applyAssistantProposal}
+        onDiscard={() => setAssistantProposal(null)}
+        onUndo={undoAssistantProposal}
+      />
     </div>
   )
 }

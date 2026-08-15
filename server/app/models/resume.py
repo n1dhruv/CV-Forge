@@ -113,6 +113,9 @@ class ResumeVersion(Base):
     status: Mapped[str] = mapped_column(Text, server_default=sql_text("'draft'"))
     name: Mapped[str] = mapped_column(Text, default="Resume", server_default=sql_text("'Resume'"))
     version_label: Mapped[str] = mapped_column(Text, default="Initial", server_default=sql_text("'Initial'"))
+    selected_skills: Mapped[list[dict]] = mapped_column(
+        JSONB, default=list, server_default=sql_text("'[]'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(server_default=sql_text("now()"))
 
 

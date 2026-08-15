@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.api.jd import router as jd_router
 from app.api.jobs import router as jobs_router
 from app.api.match import router as match_router
+from app.api.profile import router as profile_router
 from app.api.resume_imports import router as resume_imports_router
 from app.api.resume_versions import router as resume_versions_router
 from app.api.skill_bank import router as skill_bank_router
@@ -53,6 +54,7 @@ app.include_router(llm_settings_router)
 app.include_router(jd_router)
 app.include_router(jobs_router)
 app.include_router(match_router)
+app.include_router(profile_router)
 app.include_router(resume_imports_router)
 app.include_router(resume_versions_router)
 

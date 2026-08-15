@@ -11,7 +11,6 @@ DEFAULTS = {
     "SUPABASE_STORAGE_BUCKET_RESUME_IMPORTS": "resume-imports",
     "REDIS_URL": "redis://localhost:6379/15",
     "ENCRYPTION_KEY": Fernet.generate_key().decode(),
-    "EMBEDDING_MODEL": "test",
     "PINECONE_API_KEY": "test",
     "PINECONE_INDEX_NAME": "resumeforge-bullets",
     "PINECONE_HOST": "https://test-index.example.test",

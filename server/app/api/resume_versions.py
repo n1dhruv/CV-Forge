@@ -12,6 +12,8 @@ from app.db.session import get_db_session
 from app.schemas.resume_version import (
     ResumeBulletSelectionRead,
     ResumeBulletSelectionUpdate,
+    AssistantProposal,
+    AssistantRequest,
     ResumeVersionCreate,
     ResumeOperationQueued,
     ResumeTexUpdate,
@@ -24,7 +26,7 @@ from app.schemas.resume_version import (
     RewriteQueued,
     RewriteRequest,
 )
-from app.services import resume_versions, rewriter
+from app.services import llm_client, resume_versions, rewriter, tex_assistant
 from app.services.storage import StorageService
 
 router = APIRouter(tags=["resume-versions"])
@@ -81,7 +83,10 @@ async def start_rewrite(
 ) -> RewriteQueued:
     try:
         queued = await resume_versions.queue_rewrite(
-            session, current_user.id, version_id, payload.bullet_point_ids
+            session,
+            current_user.id,
+            version_id,
+            [(selection.kind, selection.id) for selection in payload.selections],
         )
     except resume_versions.InvalidResumeVersionStateError as exc:
         raise HTTPException(status_code=409, detail="Resume version is not a draft") from exc
@@ -97,7 +102,7 @@ async def start_rewrite(
             str(version.id),
             str(job.id),
             str(current_user.id),
-            [str(value) for value in payload.bullet_point_ids],
+            [str(selection.id) for selection in payload.selections if selection.kind == "bullet"],
             _job_id=str(job.id),
         )
         if result is None:
@@ -226,6 +231,32 @@ async def update_resume_tex(
     if version is None:
         raise HTTPException(status_code=404, detail="Resume version not found")
     return await _version_detail(version, settings)
+
+
+@router.post("/api/resume_versions/{version_id}/assistant", response_model=AssistantProposal)
+async def propose_tex(
+    version_id: UUID,
+    payload: AssistantRequest,
+    session: Session,
+    current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AssistantProposal:
+    version = await resume_versions.get_owned(session, current_user.id, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Resume version not found")
+    if version.status not in resume_versions.STABLE_SOURCE_STATUSES or not version.tex_source:
+        raise HTTPException(status_code=409, detail="Resume source is not ready for assistance")
+    try:
+        context = await tex_assistant.build_context(session, current_user.id, version)
+        return await tex_assistant.propose(current_user.id, payload.instruction, context, settings)
+    except tex_assistant.AssistantContextTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="Resume context is too large for assistance") from exc
+    except llm_client.LLMNotConfiguredError as exc:
+        raise HTTPException(status_code=422, detail="No LLM provider configured") from exc
+    except llm_client.LLMError as exc:
+        raise HTTPException(status_code=502, detail="Unable to generate resume proposal") from exc
+    except tex_assistant.InvalidAssistantProposalError as exc:
+        raise HTTPException(status_code=422, detail=exc.diagnostic) from exc
 
 
 @router.put("/api/resume_versions/{version_id}/metadata", response_model=ResumeVersionDetail)

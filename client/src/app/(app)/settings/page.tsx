@@ -17,11 +17,10 @@ export default function Settings() {
   const api = useApi()
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
-  const [testResult, setTestResult] = useState<{ kind: 'chat' | 'embedding'; success: boolean; error: string | null } | null>(null)
+  const [testResult, setTestResult] = useState<{ success: boolean; error: string | null } | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
 
   const supported = useQuery({ queryKey: ['supported-models'], queryFn: api.llmSettings.supportedModels })
-  const supportedEmbeddings = useQuery({ queryKey: ['supported-embedding-models'], queryFn: api.llmSettings.supportedEmbeddingModels })
   const current = useQuery({
     queryKey: ['llm-settings'],
     queryFn: api.llmSettings.get,
@@ -51,14 +50,8 @@ export default function Settings() {
 
   const test = useMutation({
     mutationFn: api.llmSettings.test,
-    onSuccess: (result) => setTestResult({ kind: 'chat', ...result }),
-    onError: (error) => setTestResult({ kind: 'chat', success: false, error: error.message }),
-  })
-
-  const testEmbedding = useMutation({
-    mutationFn: api.llmSettings.testEmbedding,
-    onSuccess: (result) => setTestResult({ kind: 'embedding', ...result }),
-    onError: (error) => setTestResult({ kind: 'embedding', success: false, error: error.message }),
+    onSuccess: setTestResult,
+    onError: (error) => setTestResult({ success: false, error: error.message }),
   })
 
   if (current.isPending) {
@@ -84,7 +77,7 @@ export default function Settings() {
       <PageHeader
         eyebrow="Bring your own key"
         title="LLM Settings"
-        description="MakeMyResume has no shared AI budget. Your provider bills only your usage, and your saved key is never shown again."
+        description="Your model stays primary. If it is unavailable—or you do not configure one—MakeMyResume uses its NVIDIA fallback."
       />
 
       <Reveal variant="up" delay={0.1}>
@@ -100,10 +93,8 @@ export default function Settings() {
               <SavedSettings
                 settings={configured}
                 testPending={test.isPending}
-                embeddingTestPending={testEmbedding.isPending}
                 testResult={testResult}
                 onTest={() => test.mutate()}
-                onTestEmbedding={() => testEmbedding.mutate()}
                 onEdit={() => setEditing(true)}
                 confirmRemove={confirmRemove}
                 onConfirmRemove={() => setConfirmRemove(true)}
@@ -125,10 +116,6 @@ export default function Settings() {
                 supportedPending={supported.isPending}
                 supportedError={supported.error?.message}
                 onRetrySupported={() => void supported.refetch()}
-                supportedEmbeddings={supportedEmbeddings.data ?? {}}
-                embeddingsPending={supportedEmbeddings.isPending}
-                embeddingsError={supportedEmbeddings.error?.message}
-                onRetryEmbeddings={() => void supportedEmbeddings.refetch()}
                 current={configured}
                 pending={save.isPending}
                 error={save.error?.message}
@@ -146,10 +133,8 @@ export default function Settings() {
 function SavedSettings({
   settings,
   testPending,
-  embeddingTestPending,
   testResult,
   onTest,
-  onTestEmbedding,
   onEdit,
   confirmRemove,
   onConfirmRemove,
@@ -159,9 +144,8 @@ function SavedSettings({
 }: any) {
   return (
     <section className="max-w-3xl">
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="max-w-xl">
         <SavedConfiguration title="Chat & Completions" provider={settings.provider} model={settings.model} maskedKey={settings.masked_key} onTest={onTest} testPending={testPending} />
-        <SavedConfiguration title="Embedding provider (for matching)" provider={settings.embedding_provider} model={settings.embedding_model} maskedKey={settings.masked_embedding_key} onTest={onTestEmbedding} testPending={embeddingTestPending} />
       </div>
 
       <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t pt-8">
@@ -199,7 +183,7 @@ function SavedSettings({
               {testResult.success ? <Check size={18} className="mt-0.5 shrink-0" aria-hidden="true" /> : <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />}
               <span className="leading-relaxed">
                 {testResult.success
-                  ? `${testResult.kind === 'embedding' ? 'Embedding' : 'Chat'} connection works.`
+                  ? 'Chat connection works.'
                   : testResult.error || 'The provider rejected the connection. Check the model and API key.'}
               </span>
             </motion.div>
@@ -231,11 +215,7 @@ function SavedConfiguration({ title, provider, model, maskedKey, onTest, testPen
               <p className="font-mono text-xs text-muted" translate="no">{maskedKey}</p>
             </div>
           </div>
-        ) : (
-          <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-4 text-center">
-            <p className="text-sm text-muted">Not configured. MakeMyResume will fallback to the chat provider key.</p>
-          </div>
-        )}
+        ) : null}
       </div>
 
       <div className="mt-6 border-t pt-5">
@@ -253,10 +233,6 @@ function SettingsForm({
   supportedPending,
   supportedError,
   onRetrySupported,
-  supportedEmbeddings,
-  embeddingsPending,
-  embeddingsError,
-  onRetryEmbeddings,
   current,
   pending,
   error,
@@ -264,11 +240,7 @@ function SettingsForm({
   onSave,
 }: any) {
   const [chat, setChat] = useState<ModelSelection | null>(current ? { provider: current.provider, model: current.model } : null)
-  const [embedding, setEmbedding] = useState<ModelSelection | null>(
-    current?.embedding_provider && current.embedding_model ? { provider: current.embedding_provider, model: current.embedding_model } : null
-  )
   const [apiKey, setApiKey] = useState('')
-  const [embeddingApiKey, setEmbeddingApiKey] = useState('')
   const [selectionError, setSelectionError] = useState('')
 
   useEffect(() => {
@@ -290,13 +262,6 @@ function SettingsForm({
         }
         const values: LLMSettingsInput = { provider: chat.provider, model: chat.model }
         if (apiKey.trim()) values.api_key = apiKey.trim()
-        if (embedding) {
-          Object.assign(values, {
-            embedding_provider: embedding.provider,
-            embedding_model: embedding.model,
-          })
-          if (embeddingApiKey.trim()) values.embedding_api_key = embeddingApiKey.trim()
-        }
         onSave(values)
       }}
     >
@@ -313,7 +278,6 @@ function SettingsForm({
               id="chat-model"
               label="Provider & Model"
               description="Choose the language model used for completion requests."
-              purpose="chat"
               value={chat}
               supportedModels={supported}
               loading={supportedPending}
@@ -346,64 +310,10 @@ function SettingsForm({
           </div>
         </section>
 
-        <section className="mt-10 border-t pt-10" aria-labelledby="embedding-settings-title">
-          <div className="mb-6">
-            <p className="eyebrow">Optional</p>
-            <h2 id="embedding-settings-title" className="mt-1 section-title">Embedding provider (for matching)</h2>
-            <p className="mt-2 text-sm text-muted max-w-2xl leading-relaxed">
-              Matching needs vector embeddings, which can come from a different provider than chat. 
-              Anthropic, for example, offers Claude for text generation but no embedding model.
-            </p>
-          </div>
-          
-          <div className="rounded-lg border bg-raised p-5 space-y-6">
-            <ModelProviderPicker
-              id="embedding-model"
-              label="Provider & Model"
-              description="Choose the model used to compare your evidence with job requirements."
-              purpose="embedding"
-              value={embedding}
-              supportedModels={supportedEmbeddings}
-              loading={embeddingsPending}
-              error={embeddingsError}
-              onRetry={onRetryEmbeddings}
-              onChange={setEmbedding}
-            />
-            
-            <label className="block text-sm font-semibold" htmlFor="embedding-api-key">
-              {current?.masked_embedding_key ? 'New Embedding API Key (optional)' : 'Embedding API Key'}
-              <input
-                id="embedding-api-key"
-                name="embedding-api-key"
-                className="field mt-2 bg-canvas font-mono"
-                type="password"
-                required={!!embedding && !current?.masked_embedding_key}
-                autoComplete="new-password"
-                spellCheck={false}
-                value={embeddingApiKey}
-                onChange={(event) => setEmbeddingApiKey(event.target.value)}
-                placeholder={current?.masked_embedding_key ? 'Enter a new embedding key to update…' : 'Paste an embedding provider key…'}
-              />
-              {current?.masked_embedding_key && (
-                <span className="mt-2 block font-normal text-muted">
-                  Leave blank to keep the current key ({current.masked_embedding_key}).
-                </span>
-              )}
-            </label>
-            
-            {!embedding && (
-              <div className="flex items-start gap-3 rounded-md bg-canvas p-4 text-sm text-muted border border-line">
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <p>Leave this unset to reuse your chat provider&apos;s key. That fallback will fail when the chat provider does not support embeddings.</p>
-              </div>
-            )}
-          </div>
-        </section>
-
         {error && (
           <div className="mt-8 flex items-start gap-3 rounded-md border border-danger/30 bg-danger/5 p-4 text-sm text-danger" role="alert">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
-            <p>{error} Check both provider configurations and try again.</p>
+            <p>{error} Check the provider configuration and try again.</p>
           </div>
         )}
       </div>

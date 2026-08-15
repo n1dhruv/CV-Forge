@@ -135,7 +135,13 @@ async def rewrite_bullets_task(
             known_technologies,
         )
         results = [
-            (by_id[bullet_id], order, rewritten, flags, low_effort)
+            (
+                by_id[bullet_id],
+                int((job.result or {}).get("section_orders", {}).get(str(bullet_id), order)),
+                rewritten,
+                flags,
+                low_effort,
+            )
             for order, (bullet_id, (rewritten, flags, low_effort)) in enumerate(
                 zip(bullet_ids, rewrites, strict=True)
             )

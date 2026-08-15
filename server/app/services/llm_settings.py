@@ -29,16 +29,6 @@ async def save_for_user(
     settings.model = payload.model
     if payload.api_key is not None:
         settings.encrypted_api_key = encrypt(payload.api_key.get_secret_value())
-    if payload.embedding_provider is not None:
-        assert payload.embedding_model is not None
-        if settings.encrypted_embedding_api_key is None and payload.embedding_api_key is None:
-            raise MissingAPIKeyError("Embedding API key is required for initial setup")
-        settings.embedding_provider = payload.embedding_provider
-        settings.embedding_model = payload.embedding_model
-        if payload.embedding_api_key is not None:
-            settings.encrypted_embedding_api_key = encrypt(
-                payload.embedding_api_key.get_secret_value()
-            )
     await session.commit()
     await session.refresh(settings)
     return settings
@@ -55,11 +45,4 @@ async def delete_for_user(session: AsyncSession, user_id: UUID) -> bool:
 
 def masked_key(settings: UserLLMSettings) -> str:
     api_key = decrypt(settings.encrypted_api_key)
-    return f"••••{api_key[-4:] if len(api_key) > 4 else ''}"
-
-
-def masked_embedding_key(settings: UserLLMSettings) -> str | None:
-    if settings.encrypted_embedding_api_key is None:
-        return None
-    api_key = decrypt(settings.encrypted_embedding_api_key)
     return f"••••{api_key[-4:] if len(api_key) > 4 else ''}"

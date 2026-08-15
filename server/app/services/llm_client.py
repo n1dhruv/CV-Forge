@@ -2,6 +2,7 @@ from typing import Any
 from uuid import UUID
 
 import litellm
+from openai import OpenAIError
 from sqlalchemy import select
 
 from app.core.encryption import decrypt
@@ -11,6 +12,8 @@ from app.models.settings import UserLLMSettings
 
 COMPLETION_TIMEOUT_SECONDS = 60
 COMPLETION_RETRIES = 2
+EMBEDDING_DIMENSIONS = 2048
+EMBEDDING_MODEL = "openrouter/nvidia/nemotron-3-embed-1b:free"
 COMPLETION_RETRY_POLICY = {
     "AuthenticationErrorRetries": 0,
     "BadRequestErrorRetries": 0,
@@ -60,92 +63,80 @@ async def _settings_for_user(user_id: UUID) -> UserLLMSettings | None:
 
 
 async def ensure_configured(user_id: UUID) -> None:
-    if await _settings_for_user(user_id) is None:
-        raise LLMNotConfiguredError("No LLM provider configured")
+    del user_id  # The server-managed OpenRouter fallback is always configured.
 
 
-async def get_completion(user_id: UUID, messages: list[dict[str, str]], **kwargs: Any) -> str:
+async def get_completion(
+    user_id: UUID,
+    messages: list[dict[str, str]],
+    *,
+    allow_fallback: bool = True,
+    **kwargs: Any,
+) -> str:
     settings = await _settings_for_user(user_id)
-    if settings is None:
-        raise LLMNotConfiguredError("No LLM provider configured")
-
+    app_settings = get_settings()
     kwargs.setdefault("timeout", COMPLETION_TIMEOUT_SECONDS)
     kwargs.setdefault("num_retries", COMPLETION_RETRIES)
     kwargs.setdefault("retry_policy", COMPLETION_RETRY_POLICY)
-    try:
-        response = await litellm.acompletion(
-            model=provider_model(settings.provider, settings.model),
-            api_key=decrypt(settings.encrypted_api_key),
-            messages=messages,
-            **kwargs,
+    attempts = []
+    if settings is not None:
+        attempts.append(
+            (
+                provider_model(settings.provider, settings.model),
+                decrypt(settings.encrypted_api_key),
+            )
         )
-    except (litellm.AuthenticationError, litellm.PermissionDeniedError):
-        raise LLMAuthError("The provider rejected the configured credentials") from None
-    except litellm.RateLimitError:
-        raise LLMRateLimitError("The provider rate limit was reached") from None
-    except (
-        litellm.APIError,
-        litellm.APIConnectionError,
-        litellm.BadRequestError,
-        litellm.NotFoundError,
-        litellm.ServiceUnavailableError,
-        litellm.Timeout,
-    ):
-        raise LLMProviderError("The LLM provider could not complete the request") from None
+    if allow_fallback:
+        fallback = (
+            f"openrouter/{app_settings.openrouter_fallback_model}",
+            app_settings.openrouter_api_key.get_secret_value(),
+        )
+        if fallback not in attempts:
+            attempts.append(fallback)
+    elif not attempts:
+        raise LLMNotConfiguredError("No user completion model is configured")
 
-    content = response.choices[0].message.content
-    if not isinstance(content, str) or not content.strip():
-        raise LLMProviderError("The LLM provider returned an empty response")
-    return content
+    for model, api_key in attempts:
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                api_key=api_key,
+                messages=messages,
+                **kwargs,
+            )
+            content = response.choices[0].message.content
+            if isinstance(content, str) and content.strip():
+                return content
+        except (
+            litellm.AuthenticationError,
+            litellm.PermissionDeniedError,
+            litellm.RateLimitError,
+            OpenAIError,
+            AttributeError,
+            IndexError,
+        ):
+            continue
+    raise LLMProviderError("The LLM provider could not complete the request")
 
 
 async def get_embeddings(user_id: UUID, texts: list[str]) -> list[list[float]]:
+    del user_id
     if not texts:
         return []
-    settings = await _settings_for_user(user_id)
-    if settings is None:
-        raise LLMNotConfiguredError("No LLM provider configured")
-
-    provider = settings.embedding_provider or settings.provider
-    model = settings.embedding_model or get_settings().embedding_model
-    encrypted_key = settings.encrypted_embedding_api_key or settings.encrypted_api_key
-    if not model:
-        raise EmbeddingProviderUnsupportedError(
-            "No embedding model is configured for this provider"
-        )
-    resolved_model = provider_model(provider, model)
-    try:
-        if litellm.get_model_info(resolved_model).get("mode") != "embedding":
-            raise EmbeddingProviderUnsupportedError(
-                f"{provider} does not support the configured embedding model"
-            )
-    except EmbeddingProviderUnsupportedError:
-        raise
-    except Exception:
-        # Unknown/custom models are allowed to reach the provider.
-        pass
+    settings = get_settings()
 
     try:
         response = await litellm.aembedding(
-            model=resolved_model,
-            api_key=decrypt(encrypted_key),
+            model=EMBEDDING_MODEL,
+            api_key=settings.openrouter_api_key.get_secret_value(),
             input=texts,
+            dimensions=EMBEDDING_DIMENSIONS,
         )
     except (litellm.AuthenticationError, litellm.PermissionDeniedError):
         raise LLMAuthError("The provider rejected the configured credentials") from None
     except litellm.RateLimitError:
         raise LLMRateLimitError("The provider rate limit was reached") from None
-    except litellm.BadRequestError as exc:
-        raise EmbeddingProviderUnsupportedError(
-            f"{provider} does not support the configured embedding model"
-        ) from exc
-    except (
-        litellm.APIError,
-        litellm.APIConnectionError,
-        litellm.NotFoundError,
-        litellm.ServiceUnavailableError,
-        litellm.Timeout,
-    ):
+    except OpenAIError:
         raise LLMProviderError("The LLM provider could not create an embedding") from None
 
     try:
@@ -153,9 +144,11 @@ async def get_embeddings(user_id: UUID, texts: list[str]) -> list[list[float]]:
     except (AttributeError, KeyError, TypeError):
         raise LLMProviderError("The LLM provider returned an invalid embedding") from None
     if len(vectors) != len(texts) or any(
-        not isinstance(vector, list) or not vector for vector in vectors
+        not isinstance(vector, list) or len(vector) != EMBEDDING_DIMENSIONS for vector in vectors
     ):
-        raise LLMProviderError("The LLM provider returned an invalid embedding")
+        raise LLMProviderError(
+            f"The embedding provider must return {EMBEDDING_DIMENSIONS}-dimension vectors"
+        )
     return [[float(value) for value in vector] for vector in vectors]
 
 

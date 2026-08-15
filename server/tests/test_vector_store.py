@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
+from sqlalchemy.dialects import postgresql
+
 from app.api.skill_bank import routes
 from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
@@ -166,6 +168,31 @@ async def test_creating_bulletless_item_queues_item_embedding(monkeypatch) -> No
 
     assert created is item
     routes.embeddings.enqueue_items.assert_awaited_once_with(session, queue, user.id, [item.id])
+
+
+async def test_reembed_all_queues_every_owned_item_and_bullet(monkeypatch) -> None:
+    user = User(id=uuid4(), email="a@example.com")
+    item_ids, bullet_ids = [uuid4(), uuid4()], [uuid4(), uuid4(), uuid4()]
+    session = AsyncMock()
+    session.scalars.side_effect = [
+        SimpleNamespace(all=lambda: item_ids),
+        SimpleNamespace(all=lambda: bullet_ids),
+    ]
+    queue = object()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(arq=queue)))
+    monkeypatch.setattr(routes.embeddings, "enqueue_items", AsyncMock(return_value=1))
+    monkeypatch.setattr(routes.embeddings, "enqueue_bullets", AsyncMock(return_value=2))
+
+    result = await routes.reembed_all(request, session, user)
+
+    assert result.model_dump() == {"items_queued": 1, "bullets_queued": 2, "failed": 2}
+    routes.embeddings.enqueue_items.assert_awaited_once_with(session, queue, user.id, item_ids)
+    routes.embeddings.enqueue_bullets.assert_awaited_once_with(session, queue, user.id, bullet_ids)
+    queries = [
+        str(call.args[0].compile(dialect=postgresql.dialect()))
+        for call in session.scalars.await_args_list
+    ]
+    assert all("skill_bank_items.user_id" in query for query in queries)
 
 
 def test_ownership_isolation_holds_in_both_indexes(monkeypatch) -> None:

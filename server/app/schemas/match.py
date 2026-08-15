@@ -8,6 +8,7 @@ from pydantic import BaseModel, model_validator
 class MatchedRequirement(BaseModel):
     id: UUID
     text: str
+    importance: Literal["required", "nice_to_have"]
     score: float
     confidence: Literal["strong", "moderate"]
     technology_evidence: list[str]
@@ -19,6 +20,7 @@ class MatchedBullet(BaseModel):
     text: str
     score: float
     confidence: Literal["strong", "moderate"]
+    recommended: bool = False
     requirements: list[MatchedRequirement]
 
     @model_validator(mode="after")

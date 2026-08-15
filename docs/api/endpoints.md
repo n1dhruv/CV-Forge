@@ -65,6 +65,13 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 **Response:** `204`.  
 **Errors:** `404`; external vector-store errors prevent the PostgreSQL delete.
 
+### POST /api/skill_bank/items/reembed
+**Auth required:** yes  
+**Description:** Queues fresh dense and sparse embeddings for every Skill Bank item and bullet owned by the current user. Stable vector IDs make retries overwrite-safe.  
+**Request:** None.  
+**Response:** `202` with `{items_queued, bullets_queued, failed}`. Counts report actual queue results.  
+**Errors:** `401`; queue failures are recorded on the generated background jobs.
+
 ### GET /api/settings/llm/supported-models
 **Auth required:** no  
 **Description:** Lists completion models shown by the settings UI.  
@@ -72,25 +79,18 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 **Response:** Provider-to-model mapping.  
 **Errors:** None under normal operation.
 
-### GET /api/settings/llm/supported-embedding-models
-**Auth required:** no  
-**Description:** Lists the curated embedding providers and models shown in Settings.  
-**Request:** None.  
-**Response:** Provider-to-model mapping.  
-**Errors:** None under normal operation.
-
 ### POST /api/settings/llm
 **Auth required:** yes  
-**Description:** Encrypts and saves completion settings plus an optional explicit embedding configuration.  
-**Request:** `provider`, `model`, and `api_key` for initial setup. On later updates, omit either API key to preserve its existing encrypted value. An embedding provider and model must be supplied together; its key is required only when first configuring embeddings.  
+**Description:** Encrypts and saves the optional user completion configuration.  
+**Request:** `provider`, `model`, and `api_key` for initial setup. On later updates, omit the API key to preserve its existing encrypted value.  
 **Response:** Saved provider/model names; never returns keys.  
-**Errors:** `422` when an initial API key or a paired embedding provider/model is missing.
+**Errors:** `422` when the initial API key is missing.
 
 ### GET /api/settings/llm
 **Auth required:** yes  
-**Description:** Returns provider/model names and masked keys.  
+**Description:** Returns completion provider/model names and the masked key.  
 **Request:** None.  
-**Response:** Completion and optional embedding settings with masked secrets.  
+**Response:** Completion provider/model and masked secret.  
 **Errors:** `404` when not configured.
 
 ### DELETE /api/settings/llm
@@ -102,14 +102,7 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 
 ### POST /api/settings/llm/test
 **Auth required:** yes  
-**Description:** Sends a minimal completion request through the current user's provider.  
-**Request:** None.  
-**Response:** `{success, error}` with provider-independent safe errors.  
-**Errors:** Provider failures are represented in the response.
-
-### POST /api/settings/llm/test-embedding
-**Auth required:** yes  
-**Description:** Tests the saved embedding configuration, including the chat-provider fallback when a separate embedding provider is unset.  
+**Description:** Sends a minimal completion request through the current user's provider without using the server fallback.  
 **Request:** None.  
 **Response:** `{success, error}` with provider-independent safe errors.  
 **Errors:** Provider failures are represented in the response.
@@ -140,7 +133,7 @@ All `/api` endpoints require a Supabase Auth bearer token except where noted. Ow
 **Description:** Matches an owned, completed JD synchronously in the API request.  
 **Request:** JD UUID.  
 **Response:** `200` with the completed grouped `MatchResult`.
-**Errors:** `400` if embeddings are not configured; `404` for a foreign, missing, or incomplete JD; `422` for an unsupported embedding model; `502` for embedding, Pinecone, or OpenRouter failures.
+**Errors:** `404` for a foreign, missing, or incomplete JD; `502` for embedding, Pinecone, or OpenRouter failures.
 
 ### GET /api/background_jobs/{job_id}
 **Auth required:** yes  

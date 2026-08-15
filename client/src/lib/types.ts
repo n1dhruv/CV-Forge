@@ -12,6 +12,8 @@ export interface BulletPoint {
   updated_at: string
 }
 
+export interface ItemLink { label: string; url: string }
+
 export interface SkillBankItem {
   id: string
   user_id: string
@@ -22,14 +24,17 @@ export interface SkillBankItem {
   end_date: string | null
   raw_text: string | null
   tags: string[]
+  links: ItemLink[]
+  skill_category: string | null
   source?: 'manual' | 'resume_import' | 'github'
   created_at: string
   updated_at: string
 }
 
 export interface SkillBankItemDetail extends SkillBankItem { bullet_points: BulletPoint[] }
-export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags'>>
+export type SkillBankItemInput = Pick<SkillBankItem, 'type' | 'title'> & Partial<Pick<SkillBankItem, 'org' | 'start_date' | 'end_date' | 'raw_text' | 'tags' | 'links' | 'skill_category'>>
 export type BulletPointInput = Pick<BulletPoint, 'text'> & Partial<Pick<BulletPoint, 'tags' | 'metrics' | 'display_order'>>
+export interface ReembedQueued { items_queued: number; bullets_queued: number; failed: number }
 
 export interface JDTechnologyRequirement {
   requirement: string
@@ -58,29 +63,21 @@ export interface JDRequirement {
 export interface JobDescription { id: string; status: JobStatus; parsed_json: JDParsed | null; requirements: JDRequirement[]; action_verbs?: string[] | null }
 export interface JobDescriptionListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
 export interface JDParseQueued { job_description_id: string; background_job_id: string }
-export interface CompileDiagnostic { kind: string; message: string; line?: number | null }
+export interface CompileDiagnostic { kind: 'syntax' | 'timeout' | 'layout' | 'internal'; message: string; line?: number | null }
 export interface BackgroundJob { status: JobStatus; result: ({ errors?: CompileDiagnostic[] } & Record<string, unknown>) | null; error: string | null }
 export interface LLMSettings {
   provider: string
   model: string
   masked_key: string
-  embedding_provider?: string | null
-  embedding_model?: string | null
-  masked_embedding_key?: string | null
 }
 export interface LLMSettingsInput {
   provider: string
   model: string
   api_key?: string
-  embedding_provider?: string
-  embedding_model?: string
-  embedding_api_key?: string
 }
 export interface LLMSettingsSaved {
   provider: string
   model: string
-  embedding_provider?: string | null
-  embedding_model?: string | null
 }
 export interface LLMTestResult { success: boolean; error: string | null }
 export type SupportedModels = Record<string, string[]>
@@ -89,6 +86,7 @@ export type MatchConfidence = 'strong' | 'moderate'
 export interface MatchedRequirement {
   id: string
   text: string
+  importance: 'required' | 'nice_to_have'
   score: number
   confidence: MatchConfidence
   technology_evidence: string[]
@@ -99,6 +97,7 @@ export interface MatchedBullet {
   text: string
   score: number
   confidence: MatchConfidence
+  recommended: boolean
   requirements: MatchedRequirement[]
 }
 export interface MatchedItem {
@@ -113,7 +112,7 @@ export interface MatchedItem {
 export interface RequirementMatch {
   id: string
   text: string
-  importance: string
+  importance: 'required' | 'nice_to_have'
   named_technologies: string[]
   technology_match_mode: 'any' | 'all' | null
   technology_evidence: string[]
@@ -134,6 +133,7 @@ export interface ResumeVersionHistoryItem { id: string; parent_version_id: strin
 export interface ResumeVersionListItem extends ResumeVersionHistoryItem {}
 export interface ResumeFamily { id: string; name: string; versions: ResumeVersionListItem[] }
 export interface ResumeMetadataUpdate { name?: string; version_label?: string }
+export interface RewriteSelection { kind: 'bullet' | 'skill'; id: string }
 export interface GuardrailFlag {
   term: string
   reason: 'number_changed' | 'new_technology' | 'unsupported_claim'
@@ -158,6 +158,19 @@ export interface ResumeBulletSelectionUpdate {
 }
 
 export type ResumeImportItemType = 'experience' | 'project' | 'education' | 'certification'
+export interface Profile {
+  full_name: string | null
+  contact_email: string
+  phone: string | null
+  location: string | null
+  linkedin_url: string | null
+  github_url: string | null
+  leetcode_url: string | null
+  portfolio_url: string | null
+}
+export type ProfileUpdate = Partial<{ [Field in keyof Profile]: Profile[Field] | null }>
+export interface ResumeImportProfile extends Omit<Profile, 'contact_email'> { contact_email: string | null }
+export interface ResumeImportSkill { name: string; category: string | null }
 export interface ResumeImportItem {
   type: ResumeImportItemType
   title: string
@@ -166,7 +179,7 @@ export interface ResumeImportItem {
   end_date: string | null
   bullets: string[]
 }
-export interface ParsedResumeImport { items: ResumeImportItem[]; skills: string[] }
+export interface ParsedResumeImport { items: ResumeImportItem[]; skills: ResumeImportSkill[]; profile: ResumeImportProfile | null }
 export interface ResumeImport {
   id: string
   status: JobStatus
@@ -176,8 +189,9 @@ export interface ResumeImport {
 }
 export interface ResumeImportListItem { id: string; excerpt: string; status: JobStatus; created_at: string }
 export interface ResumeImportQueued { resume_import_id: string; background_job_id: string }
-export interface ResumeImportCommit { items: ResumeImportItem[]; skills: string[] }
+export interface ResumeImportCommit { items: ResumeImportItem[]; skills: ResumeImportSkill[]; profile?: ResumeImportProfile | null }
 export interface ResumeImportCommitResult { items: SkillBankItemDetail[] }
+export interface AssistantProposal { message: string; tex_source: string }
 
 // Demo-only types retained for later-phase screens that already exist but are out of scope here.
 export type JobState = JobStatus

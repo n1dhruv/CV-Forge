@@ -102,7 +102,10 @@ async def get_owned(
 
 
 async def queue_rewrite(
-    session: AsyncSession, user_id: UUID, version_id: UUID, bullet_ids: list[UUID]
+    session: AsyncSession,
+    user_id: UUID,
+    version_id: UUID,
+    selections: list[tuple[str, UUID]],
 ) -> tuple[ResumeVersion, BackgroundJob] | None:
     version = await get_owned(session, user_id, version_id, lock=True)
     if version is None:
@@ -110,7 +113,9 @@ async def queue_rewrite(
     if version.status != "draft":
         raise InvalidResumeVersionStateError
 
-    owned_ids = set(
+    bullet_ids = [selection_id for kind, selection_id in selections if kind == "bullet"]
+    skill_ids = [selection_id for kind, selection_id in selections if kind == "skill"]
+    owned_bullet_ids = set(
         (
             await session.scalars(
                 select(BulletPoint.id)
@@ -119,8 +124,32 @@ async def queue_rewrite(
             )
         ).all()
     )
-    if owned_ids != set(bullet_ids):
+    if owned_bullet_ids != set(bullet_ids):
         raise InvalidBulletSelectionError
+    selected_skills = list(
+        (
+            await session.scalars(
+                select(SkillBankItem).where(
+                    SkillBankItem.id.in_(skill_ids),
+                    SkillBankItem.user_id == user_id,
+                    SkillBankItem.type == "skill",
+                )
+            )
+        ).all()
+    )
+    if {skill.id for skill in selected_skills} != set(skill_ids):
+        raise InvalidBulletSelectionError
+    skills_by_id = {skill.id: skill for skill in selected_skills}
+    version.selected_skills = [
+        {
+            "item_id": str(selection_id),
+            "name": skills_by_id[selection_id].title,
+            "category": skills_by_id[selection_id].skill_category,
+            "selection_order": order,
+        }
+        for order, (kind, selection_id) in enumerate(selections)
+        if kind == "skill"
+    ]
 
     job = BackgroundJob(
         user_id=user_id,
@@ -129,6 +158,11 @@ async def queue_rewrite(
         result={
             "resume_version_id": str(version_id),
             "bullet_point_ids": [str(i) for i in bullet_ids],
+            "section_orders": {
+                str(selection_id): order
+                for order, (kind, selection_id) in enumerate(selections)
+                if kind == "bullet"
+            },
         },
     )
     version.status = "rewriting"
@@ -232,7 +266,6 @@ async def update_tex(
     if version.status not in STABLE_SOURCE_STATUSES:
         raise InvalidResumeVersionStateError
     version.tex_source = tex_source
-    version.pdf_storage_path = None
     version.status = "assembled"
     await session.commit()
     await session.refresh(version)
@@ -257,6 +290,7 @@ async def create_snapshot(
         status=version.status,
         name=version.name,
         version_label=f"{version.version_label} Copy"[:80],
+        selected_skills=version.selected_skills,
     )
     session.add(clone)
     await session.commit()

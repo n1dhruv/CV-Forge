@@ -9,7 +9,6 @@ from sqlalchemy.dialects import postgresql
 from app.api.settings.llm import (
     delete_llm_settings,
     read_llm_settings,
-    test_embedding_settings as run_embedding_connection_test,
     test_llm_settings as run_connection_test,
 )
 from app.models.settings import UserLLMSettings
@@ -36,7 +35,7 @@ async def test_saving_settings_encrypts_api_key() -> None:
     session.commit.assert_awaited_once()
 
 
-async def test_updating_one_api_key_preserves_the_other() -> None:
+async def test_updating_chat_key_preserves_legacy_embedding_data() -> None:
     old_chat_key = llm_settings.encrypt("old-chat-key")
     old_embedding_key = llm_settings.encrypt("old-embedding-key")
     settings = UserLLMSettings(
@@ -59,29 +58,14 @@ async def test_updating_one_api_key_preserves_the_other() -> None:
         LLMSettingsCreate(
             provider="openai",
             model="gpt-4o-mini",
-            embedding_provider="openai",
-            embedding_model="text-embedding-3-small",
-            embedding_api_key="new-embedding-key",
-        ),
-    )
-
-    assert settings.encrypted_api_key == old_chat_key
-    assert llm_settings.decrypt(settings.encrypted_embedding_api_key) == "new-embedding-key"
-
-    await llm_settings.save_for_user(
-        session,
-        settings.user_id,
-        LLMSettingsCreate(
-            provider="openai",
-            model="gpt-4o-mini",
             api_key="new-chat-key",
-            embedding_provider="openai",
-            embedding_model="text-embedding-3-small",
         ),
     )
 
     assert llm_settings.decrypt(settings.encrypted_api_key) == "new-chat-key"
-    assert llm_settings.decrypt(settings.encrypted_embedding_api_key) == "new-embedding-key"
+    assert settings.embedding_provider == "openai"
+    assert settings.embedding_model == "text-embedding-3-small"
+    assert settings.encrypted_embedding_api_key == old_embedding_key
 
 
 async def test_initial_settings_require_the_missing_api_key() -> None:
@@ -125,18 +109,25 @@ def test_short_key_is_never_returned_in_full() -> None:
     assert llm_settings.masked_key(settings) == "••••"
 
 
-async def test_missing_settings_never_attempts_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    completion = AsyncMock()
+async def test_missing_settings_use_openrouter_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    completion = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="fallback"))]
+        )
+    )
     monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=None))
     monkeypatch.setattr(llm_client.litellm, "acompletion", completion)
 
-    with pytest.raises(llm_client.LLMNotConfiguredError):
-        await llm_client.get_completion(uuid4(), [{"role": "user", "content": "hello"}])
+    result = await llm_client.get_completion(uuid4(), [{"role": "user", "content": "hello"}])
 
-    completion.assert_not_awaited()
+    assert result == "fallback"
+    assert completion.await_args.kwargs["model"] == (
+        "openrouter/nvidia/nemotron-3.5-lightning:free"
+    )
+    assert completion.await_args.kwargs["api_key"] == "test"
 
 
-async def test_litellm_auth_error_is_normalized_without_key(
+async def test_primary_auth_failure_uses_openrouter_fallback_without_leaking_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
@@ -150,12 +141,48 @@ async def test_litellm_auth_error_is_normalized_without_key(
         "invalid sk-super-secret", "openai", "gpt-4o-mini"
     )
     monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
-    monkeypatch.setattr(llm_client.litellm, "acompletion", AsyncMock(side_effect=provider_error))
+    completion = AsyncMock(
+        side_effect=[
+            provider_error,
+            SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="fallback"))]),
+        ]
+    )
+    monkeypatch.setattr(llm_client.litellm, "acompletion", completion)
 
-    with pytest.raises(llm_client.LLMAuthError) as caught:
-        await llm_client.get_completion(user_id, [{"role": "user", "content": "hello"}])
+    result = await llm_client.get_completion(user_id, [{"role": "user", "content": "hello"}])
 
-    assert "sk-super-secret" not in str(caught.value)
+    assert result == "fallback"
+    assert "sk-super-secret" not in repr(completion.await_args_list[1])
+    assert completion.await_args_list[1].kwargs["model"] == (
+        "openrouter/nvidia/nemotron-3.5-lightning:free"
+    )
+
+
+async def test_primary_internal_error_uses_openrouter_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    settings = UserLLMSettings(
+        user_id=user_id,
+        provider="openai",
+        model="gpt-4o-mini",
+        encrypted_api_key=llm_settings.encrypt("primary-key"),
+    )
+    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
+    completion = AsyncMock(
+        side_effect=[
+            llm_client.litellm.InternalServerError(
+                "provider unavailable", "openai", "gpt-4o-mini"
+            ),
+            SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="fallback"))]),
+        ]
+    )
+    monkeypatch.setattr(llm_client.litellm, "acompletion", completion)
+
+    assert await llm_client.get_completion(
+        user_id, [{"role": "user", "content": "hello"}]
+    ) == "fallback"
+    assert completion.await_count == 2
 
 
 async def test_completion_uses_bounded_transient_retries(
@@ -192,12 +219,14 @@ async def test_completion_uses_bounded_transient_retries(
 
 
 async def test_connection_endpoint_returns_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(llm_client, "get_completion", AsyncMock(return_value="OK"))
+    completion = AsyncMock(return_value="OK")
+    monkeypatch.setattr(llm_client, "get_completion", completion)
     user = User(id=uuid4(), email="a@example.com")
 
     result = await run_connection_test(user)
 
     assert result.model_dump() == {"success": True, "error": None}
+    assert completion.await_args.kwargs["allow_fallback"] is False
 
 
 async def test_connection_endpoint_normalizes_auth_failure(
@@ -213,17 +242,6 @@ async def test_connection_endpoint_normalizes_auth_failure(
     result = await run_connection_test(user)
 
     assert result.model_dump() == {"success": False, "error": "credentials rejected"}
-
-
-async def test_embedding_connection_endpoint_uses_embedding_client(monkeypatch) -> None:
-    embedding = AsyncMock(return_value=[0.1, 0.2])
-    monkeypatch.setattr(llm_client, "get_embedding", embedding)
-    user = User(id=uuid4(), email="a@example.com")
-
-    result = await run_embedding_connection_test(user)
-
-    assert result.model_dump() == {"success": True, "error": None}
-    embedding.assert_awaited_once_with(user.id, "Resume matching connection test")
 
 
 async def test_settings_lookup_is_always_scoped_to_current_user() -> None:
@@ -258,58 +276,43 @@ def test_provider_model_uses_litellm_prefixes() -> None:
     assert llm_client.provider_model("custom", "openrouter/model") == "openrouter/model"
 
 
-async def test_get_embedding_uses_explicit_embedding_configuration(monkeypatch) -> None:
+async def test_get_embedding_always_uses_nvidia_openrouter_at_2048_dimensions(monkeypatch) -> None:
     user_id = uuid4()
-    settings = UserLLMSettings(
-        user_id=user_id,
-        provider="anthropic",
-        model="claude-haiku-4-5",
-        encrypted_api_key=llm_settings.encrypt("chat-key"),
-        embedding_provider="openai",
-        embedding_model="text-embedding-3-small",
-        encrypted_embedding_api_key=llm_settings.encrypt("embedding-key"),
+    vector = [0.1] * 2048
+    monkeypatch.setattr(
+        llm_client,
+        "_settings_for_user",
+        AsyncMock(side_effect=AssertionError("embedding must ignore user settings")),
     )
-    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
-    monkeypatch.setattr(llm_client.litellm, "get_model_info", lambda model: {"mode": "embedding"})
-    embedding = AsyncMock(return_value=SimpleNamespace(data=[{"embedding": [0.1, 0.2]}]))
+    embedding = AsyncMock(return_value=SimpleNamespace(data=[{"embedding": vector}]))
     monkeypatch.setattr(llm_client.litellm, "aembedding", embedding)
 
-    assert await llm_client.get_embedding(user_id, "Built APIs") == [0.1, 0.2]
-    assert embedding.await_args.kwargs["model"] == "openai/text-embedding-3-small"
-    assert embedding.await_args.kwargs["api_key"] == "embedding-key"
+    assert await llm_client.get_embedding(user_id, "Built APIs") == vector
+    assert embedding.await_args.kwargs["model"] == ("openrouter/nvidia/nemotron-3-embed-1b:free")
+    assert embedding.await_args.kwargs["api_key"] == "test"
+    assert embedding.await_args.kwargs["dimensions"] == 2048
 
 
 async def test_get_embeddings_batches_provider_request(monkeypatch) -> None:
     user_id = uuid4()
-    settings = UserLLMSettings(
-        user_id=user_id,
-        provider="google",
-        model="gemini-3.6-flash",
-        encrypted_api_key=llm_settings.encrypt("api-key"),
-        embedding_model="gemini-embedding-2",
-    )
-    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
-    monkeypatch.setattr(llm_client.litellm, "get_model_info", lambda model: {"mode": "embedding"})
+    vector_a, vector_b = [0.1] * 2048, [0.2] * 2048
     embedding = AsyncMock(
-        return_value=SimpleNamespace(data=[{"embedding": [0.1, 0.2]}, {"embedding": [0.3, 0.4]}])
+        return_value=SimpleNamespace(data=[{"embedding": vector_a}, {"embedding": vector_b}])
     )
     monkeypatch.setattr(llm_client.litellm, "aembedding", embedding)
 
     result = await llm_client.get_embeddings(user_id, ["Python APIs", "Apache Kafka"])
 
-    assert result == [[0.1, 0.2], [0.3, 0.4]]
+    assert result == [vector_a, vector_b]
     assert embedding.await_args.kwargs["input"] == ["Python APIs", "Apache Kafka"]
 
 
-async def test_unsupported_fallback_embedding_model_is_specific(monkeypatch) -> None:
-    settings = UserLLMSettings(
-        user_id=uuid4(),
-        provider="anthropic",
-        model="claude-haiku-4-5",
-        encrypted_api_key=llm_settings.encrypt("chat-key"),
+async def test_embedding_rejects_wrong_vector_dimension(monkeypatch) -> None:
+    monkeypatch.setattr(
+        llm_client.litellm,
+        "aembedding",
+        AsyncMock(return_value=SimpleNamespace(data=[{"embedding": [0.1]}])),
     )
-    monkeypatch.setattr(llm_client, "_settings_for_user", AsyncMock(return_value=settings))
-    monkeypatch.setattr(llm_client.litellm, "get_model_info", lambda model: {"mode": "chat"})
 
-    with pytest.raises(llm_client.EmbeddingProviderUnsupportedError):
-        await llm_client.get_embedding(settings.user_id, "Built APIs")
+    with pytest.raises(llm_client.LLMProviderError, match="2048"):
+        await llm_client.get_embedding(uuid4(), "Built APIs")

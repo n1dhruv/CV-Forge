@@ -7,9 +7,12 @@ import httpx
 from fastapi import HTTPException
 
 from app.api import resume_versions as resume_versions_api
+from app.models.jobs import BackgroundJob
 from app.models.resume import ResumeVersion
-from app.schemas.resume_version import ResumeMetadataUpdate
+from app.schemas.resume_version import ResumeMetadataUpdate, RewriteRequest
 from app.services import resume_versions
+from app.services.latex_compiler import CompileDiagnostic
+from app.workers.resume_compile import _record_failure
 
 
 def session_mock() -> MagicMock:
@@ -26,6 +29,26 @@ def test_resume_metadata_is_trimmed_and_nonempty() -> None:
 
     with pytest.raises(ValueError):
         ResumeMetadataUpdate(name="   ")
+
+
+def test_rewrite_request_accepts_ordered_unique_bullet_and_skill_selections() -> None:
+    bullet_id, skill_id = uuid4(), uuid4()
+
+    request = RewriteRequest(
+        selections=[
+            {"kind": "bullet", "id": bullet_id},
+            {"kind": "skill", "id": skill_id},
+        ]
+    )
+
+    assert [(selection.kind, selection.id) for selection in request.selections] == [
+        ("bullet", bullet_id),
+        ("skill", skill_id),
+    ]
+    with pytest.raises(ValueError):
+        RewriteRequest(
+            selections=[{"kind": "bullet", "id": bullet_id}] * 2,
+        )
 
 
 async def test_queue_assembly_moves_finalized_version_to_assembling(monkeypatch) -> None:
@@ -77,7 +100,7 @@ async def test_queue_compile_accepts_stable_source_states(monkeypatch, status) -
     assert queued[1].result["previous_status"] == status
 
 
-async def test_source_update_invalidates_pdf_without_creating_a_row(monkeypatch) -> None:
+async def test_source_update_and_failed_compile_keep_previous_pdf(monkeypatch) -> None:
     version = ResumeVersion(
         id=uuid4(), user_id=uuid4(), status="compiled", tex_source="old", pdf_storage_path="x.pdf"
     )
@@ -90,9 +113,14 @@ async def test_source_update_invalidates_pdf_without_creating_a_row(monkeypatch)
     assert (version.tex_source, version.status, version.pdf_storage_path) == (
         "new",
         "assembled",
-        None,
+        "x.pdf",
     )
     session.add.assert_not_called()
+
+    job = BackgroundJob(id=uuid4(), user_id=version.user_id, status="running")
+    _record_failure(version, job, CompileDiagnostic("syntax", "Missing }", 3))
+
+    assert version.pdf_storage_path == "x.pdf"
 
 
 async def test_snapshot_sets_parent_and_copies_stable_document(monkeypatch) -> None:
@@ -103,6 +131,7 @@ async def test_snapshot_sets_parent_and_copies_stable_document(monkeypatch) -> N
         status="compiled",
         tex_source="source",
         pdf_storage_path="resume.pdf",
+        selected_skills=["Python"],
     )
     session = session_mock()
     monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=version))
@@ -111,6 +140,7 @@ async def test_snapshot_sets_parent_and_copies_stable_document(monkeypatch) -> N
 
     assert clone and clone.parent_version_id == version.id
     assert clone.tex_source == "source" and clone.pdf_storage_path == "resume.pdf"
+    assert clone.selected_skills == ["Python"]
     session.add.assert_called_once_with(clone)
 
 

@@ -26,17 +26,18 @@ async def _enqueue(
     user_id: UUID,
     record_ids: Iterable[UUID],
     task_name: str,
-) -> None:
+) -> int:
     jobs = [
         (record_id, BackgroundJob(user_id=user_id, job_type="embedding", status="queued"))
         for record_id in dict.fromkeys(record_ids)
     ]
     if not jobs:
-        return
+        return 0
     session.add_all([job for _, job in jobs])
     await session.commit()
     for _, job in jobs:
         await session.refresh(job)
+    queued_count = 0
     for record_id, job in jobs:
         try:
             queued = await queue.enqueue_job(
@@ -48,10 +49,12 @@ async def _enqueue(
             )
             if queued is None:
                 raise RuntimeError("Job ID already exists")
+            queued_count += 1
         except Exception:
             job.status = "failed"
             job.error = "Unable to enqueue embedding — edit the source to retry"
     await session.commit()
+    return queued_count
 
 
 async def enqueue_bullets(
@@ -59,8 +62,8 @@ async def enqueue_bullets(
     queue: ArqRedis,
     user_id: UUID,
     bullet_ids: Iterable[UUID],
-) -> None:
-    await _enqueue(session, queue, user_id, bullet_ids, "embed_bullet_task")
+) -> int:
+    return await _enqueue(session, queue, user_id, bullet_ids, "embed_bullet_task")
 
 
 async def enqueue_items(
@@ -68,5 +71,5 @@ async def enqueue_items(
     queue: ArqRedis,
     user_id: UUID,
     item_ids: Iterable[UUID],
-) -> None:
-    await _enqueue(session, queue, user_id, item_ids, "embed_item_task")
+) -> int:
+    return await _enqueue(session, queue, user_id, item_ids, "embed_item_task")

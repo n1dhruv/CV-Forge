@@ -1,6 +1,15 @@
 # AI pipelines
 
-Before using embeddings, create two serverless Pinecone indexes. The dense index (`makemyresume-bullets`) uses cosine similarity and a dimension matching the configured BYOK embedding model. The sparse index (`makemyresume-bullets-sparse`) uses vector type `sparse`, dot-product similarity, and no fixed dimension. Set `PINECONE_INDEX_NAME`, `PINECONE_HOST`, `PINECONE_SPARSE_INDEX_NAME`, and the shared `PINECONE_API_KEY`. Reranking uses `OPENROUTER_API_KEY` and `OPENROUTER_RERANK_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2:free`.
+Before using embeddings, create two serverless Pinecone indexes. The dense index uses cosine similarity and exactly 2048 dimensions for the fixed `nvidia/nemotron-3-embed-1b:free` model. The sparse index (`makemyresume-bullets-sparse`) uses vector type `sparse`, dot-product similarity, and no fixed dimension. Set `PINECONE_INDEX_NAME`, `PINECONE_HOST`, `PINECONE_SPARSE_INDEX_NAME`, and the shared `PINECONE_API_KEY`. OpenRouter uses `OPENROUTER_API_KEY` with `OPENROUTER_FALLBACK_MODEL=nvidia/nemotron-3.5-lightning:free` and `OPENROUTER_RERANK_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2:free`.
+
+### Replacing an older dense index
+
+1. In Pinecone, create a new **dense**, **serverless** index with dimension `2048` and metric `cosine`. Give it a new name; do not delete the old index yet.
+2. Copy the new index name and host into `PINECONE_INDEX_NAME` and `PINECONE_HOST` in `server/.env`. Keep `PINECONE_SPARSE_INDEX_NAME` unchanged unless the sparse index is also being replaced.
+3. Run `uv run alembic upgrade head`, then restart both the API and ARQ worker so they use the new schema and index host.
+4. Open **Skill Bank** and choose **Re-embed all**. Repeating this is safe: vectors use stable item/bullet UUIDs, so Pinecone upserts replace the same IDs rather than creating duplicates.
+5. Wait for the embedding jobs to finish, then run a match. It should no longer report pending embeddings. Confirm the new dense index has vectors in each user's UUID namespace.
+6. Delete the old dense index only after the new index is populated and matching succeeds.
 
 Before using resume import, create a **private** bucket named `resume-imports` at **Supabase Dashboard → Storage → New bucket**, and set `SUPABASE_STORAGE_BUCKET_RESUME_IMPORTS=resume-imports`. Storage schema metadata is not written by Alembic.
 
@@ -9,7 +18,7 @@ Before using resume import, create a **private** bucket named `resume-imports` a
 1. The user pastes a JD or uploads a PDF.
 2. The API immediately stores a `job_descriptions` row and a `background_jobs` row in PostgreSQL, queues `jd_parse`, and returns both IDs.
 3. The worker reads the text, using the private Supabase Storage object when a PDF was uploaded.
-4. The worker calls the submitting user's encrypted BYOK completion configuration and validates the response. One correction attempt is allowed. Named technologies are extracted per requirement with `any`/`all` semantics, and every extracted term must occur in the requirement or source JD.
+4. The worker calls the user's encrypted completion configuration when present, falling back to NVIDIA Nemotron 3.5 Lightning through OpenRouter when missing or unavailable, and validates the response. One correction attempt is allowed. Named technologies are extracted per requirement with `any`/`all` semantics, and every extracted term must occur in the requirement or source JD.
 5. In one PostgreSQL transaction it stores parsed JSON, required/nice-to-have requirement rows, their validated technology terms, and action-verb rows, then marks the job done.
 6. The UI polls the generic job endpoint and reads the JD detail. Legacy JDs missing newer parsed fields return empty lists instead of failing.
 
@@ -17,11 +26,11 @@ Before using resume import, create a **private** bucket named `resume-imports` a
 
 1. Creating or editing a Skill Bank item queues an item-level `embedding` job; creating or editing a bullet queues a bullet-level job. Changing an item also refreshes its existing bullets because their metadata includes the parent type.
 2. The CRUD request returns without waiting for the LLM or Pinecone.
-3. The worker loads the real PostgreSQL row. Bullet text is embedded directly; item text combines the item's title, tags, and raw text. In parallel it calls the user's configured dense embedding provider and Pinecone's hosted `pinecone-sparse-english-v0` passage encoder, then writes the result to both indexes. A partial failure records which write succeeded and leaves the job failed so the source can be retried.
+3. The worker loads the real PostgreSQL row. Bullet text is embedded directly; item text combines the item's title, tags, and raw text. In parallel it calls NVIDIA Nemotron 3 Embed 1B through OpenRouter for a 2048-dimension dense vector and Pinecone's hosted `pinecone-sparse-english-v0` passage encoder, then writes the result to both indexes. A partial failure records which write succeeded and leaves the job failed so the source can be retried.
 4. Both indexes store every user's vectors in a namespace named with that user's UUID. Vector IDs equal the source `bullet_points.id` or `skill_bank_items.id`. Metadata uses `level=bullet` or `level=item`; bullet vectors include `bullet_id`, while item vectors omit that key because Pinecone does not support null metadata. Both levels include `item_id` and `item_type`. PostgreSQL remains the source of truth.
 5. `POST /api/match/{jd_id}` validates the completed owned JD and runs matching in the API request.
 6. The API confirms every owned item and bullet exists in both indexes. Any source missing either vector is ineligible and sets `pending_embeddings=true`.
-7. For each requirement, the API creates its BYOK dense embedding and concurrently retrieves up to 25 candidates from each index. Results are merged and deduplicated by `(level, source UUID)`, then the corresponding owned item or bullet text is loaded from PostgreSQL.
+7. For each requirement, the API creates its NVIDIA dense embedding and concurrently retrieves up to 25 candidates from each index. Results are merged and deduplicated by `(level, source UUID)`, then the corresponding owned item or bullet text is loaded from PostgreSQL.
 8. The unified candidate set is sent to OpenRouter's hosted reranker. If an item-level vector and one of its bullets both qualify for the same requirement, only the higher-scoring level is kept. Candidates below `MIN_RERANK_SCORE=0.0001` are excluded; confidence is `strong >= 0.01` or `moderate >= 0.0001`.
 9. The API returns the complete validated `MatchResult`. Provider/vector failures return HTTP 502 and are visible in browser developer tools.
 10. Deleting a bullet removes its vectors. Deleting an item removes both its own item-ID vectors and every child bullet vector from both indexes before deleting PostgreSQL content, preventing stale results from resurfacing.
@@ -30,8 +39,8 @@ Before using resume import, create a **private** bucket named `resume-imports` a
 
 1. The user uploads a PDF or DOCX.
 2. The API writes the file to the private Supabase `resume-imports` bucket, creates PostgreSQL staging/job rows, queues `resume_import`, and immediately returns both IDs.
-3. The worker checks the user's LLM settings before spending work on extraction, downloads the object, extracts text, and saves that raw text on the staging row.
-4. The worker asks the user's completion model for a strict JSON structure. The prompt forbids inference or embellishment, and a server check rejects returned bullets/skills that are not literally present in the extracted text.
+3. The worker downloads the object, extracts text, and saves that raw text on the staging row.
+4. The worker asks the user's completion model—or the server fallback when absent/unavailable—for a strict JSON structure. The prompt forbids inference or embellishment, and a server check rejects returned bullets/skills that are not literally present in the extracted text.
 5. A valid response is stored only in `resume_imports.parsed_json`. It is review data, not Skill Bank data.
 6. The user edits/removes content and submits the final selection to `/commit`.
 7. One transaction writes only submitted items and bullets into PostgreSQL with `source=resume_import`, marks the staging row committed, and rejects a second commit. Item and bullet embedding jobs then populate Pinecone asynchronously, including imported skills that have no bullets.

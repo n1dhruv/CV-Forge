@@ -8,7 +8,7 @@ from sqlalchemy.dialects import postgresql
 from app.api import resume_versions as resume_versions_api
 from app.models.jobs import BackgroundJob
 from app.models.resume import ResumeBulletSelection, ResumeVersion
-from app.models.skill_bank import BulletPoint
+from app.models.skill_bank import BulletPoint, SkillBankItem
 from app.models.user import User
 from app.schemas.resume_version import ResumeBulletSelectionUpdate
 from app.services import resume_versions
@@ -111,6 +111,30 @@ async def test_non_draft_version_cannot_queue_rewrite(monkeypatch) -> None:
 
     with pytest.raises(resume_versions.InvalidResumeVersionStateError):
         await resume_versions.queue_rewrite(AsyncMock(), version.user_id, version.id, [uuid4()])
+
+
+async def test_queue_rewrite_snapshots_skills_and_keeps_request_order(monkeypatch) -> None:
+    owner = uuid4()
+    version = ResumeVersion(id=uuid4(), user_id=owner, status="draft")
+    bullet_id, skill_id = uuid4(), uuid4()
+    skill = SkillBankItem(
+        id=skill_id, user_id=owner, type="skill", title="Python", skill_category="Languages"
+    )
+    session = MagicMock()
+    session.scalars = AsyncMock(side_effect=[ScalarResult([bullet_id]), ScalarResult([skill])])
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    monkeypatch.setattr(resume_versions, "get_owned", AsyncMock(return_value=version))
+
+    queued = await resume_versions.queue_rewrite(
+        session, owner, version.id, [("skill", skill_id), ("bullet", bullet_id)]
+    )
+
+    assert queued is not None
+    assert version.selected_skills == [
+        {"item_id": str(skill_id), "name": "Python", "category": "Languages", "selection_order": 0}
+    ]
+    assert queued[1].result["section_orders"] == {str(bullet_id): 1}
 
 
 def review_rows() -> tuple[User, ResumeVersion, ResumeBulletSelection, BulletPoint]:

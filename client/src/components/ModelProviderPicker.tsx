@@ -11,7 +11,6 @@ interface ModelProviderPickerProps {
   id: string
   label: string
   description: string
-  purpose: 'chat' | 'embedding'
   value: ModelSelection | null
   supportedModels: SupportedModels
   loading: boolean
@@ -24,7 +23,7 @@ interface ModelProviderPickerProps {
 const preferredProviders = ['openai', 'anthropic', 'google']
 
 const providerDetails: Record<string, { name: string; detail: string }> = {
-  openai: { name: 'OpenAI', detail: 'GPT & embedding models' },
+  openai: { name: 'OpenAI', detail: 'GPT language models' },
   anthropic: { name: 'Anthropic', detail: 'Claude language models' },
   google: { name: 'Google', detail: 'Gemini models' },
   custom: { name: 'Custom', detail: 'Any supported provider' },
@@ -36,7 +35,6 @@ function providerName(provider: string) {
 
 function modelHint(model: string, provider: string) {
   const value = model.toLowerCase()
-  if (value.includes('embedding')) return 'Designed for vector representations.'
   if (/(mini|haiku|flash)/.test(value)) return 'Lighter-weight model option.'
   if (/(pro|sonnet|4o)/.test(value)) return 'General-purpose model option.'
   return `Available from ${providerName(provider)}.`
@@ -55,7 +53,6 @@ export function ModelProviderPicker({
   id,
   label,
   description,
-  purpose,
   value,
   supportedModels,
   loading,
@@ -82,7 +79,6 @@ export function ModelProviderPicker({
     () => (supportedModels[provider] ?? []).filter(model => fuzzyMatch(model, query)),
     [provider, query, supportedModels],
   )
-  const embeddingUnavailable = purpose === 'embedding' && provider === 'anthropic'
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -135,7 +131,7 @@ export function ModelProviderPicker({
       searchRef.current?.focus()
       return
     }
-    if (provider === 'custom' || embeddingUnavailable || !filteredModels.length) return
+    if (provider === 'custom' || !filteredModels.length) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       const direction = event.key === 'ArrowDown' ? 1 : -1
@@ -178,7 +174,7 @@ export function ModelProviderPicker({
     >
       <div className="flex h-full max-h-[inherit] flex-col overscroll-contain">
         <header className="flex items-start justify-between gap-4 border-b px-5 py-4 sm:px-6">
-          <div><p className="eyebrow">{purpose === 'chat' ? 'Chat Configuration' : 'Embedding Configuration'}</p><h2 id={`${id}-title`} className="mt-1 font-display text-2xl font-medium">Choose a Model</h2></div>
+          <div><p className="eyebrow">Chat Configuration</p><h2 id={`${id}-title`} className="mt-1 font-display text-2xl font-medium">Choose a Model</h2></div>
           <button type="button" className="button-ghost -mr-2 touch-manipulation" aria-label="Close model picker" onClick={close}><X size={20} aria-hidden="true"/></button>
         </header>
 
@@ -186,7 +182,6 @@ export function ModelProviderPicker({
           <nav className="flex gap-2 overflow-x-auto border-b bg-surface p-3 sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r" aria-label="Model providers">
             {providers.map(item => {
               const details = providerDetails[item] ?? { name: providerName(item), detail: 'Curated models' }
-              const unavailable = purpose === 'embedding' && item === 'anthropic'
               return <button
                 type="button"
                 key={item}
@@ -195,7 +190,7 @@ export function ModelProviderPicker({
                 onClick={() => { setProvider(item); if (item === 'custom') window.setTimeout(() => customProviderRef.current?.focus()) }}
               >
                 <span className="block text-sm font-semibold">{details.name}</span>
-                <span className="mt-0.5 hidden text-xs sm:block">{unavailable ? 'No embedding support' : details.detail}</span>
+                <span className="mt-0.5 hidden text-xs sm:block">{details.detail}</span>
               </button>
             })}
           </nav>
@@ -236,7 +231,6 @@ export function ModelProviderPicker({
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
                 {loading ? <div className="space-y-2" role="status"><p className="sr-only">Loading supported models…</p>{[0, 1, 2].map(item => <div key={item} className="h-[4.5rem] animate-pulse rounded-lg border bg-surface"/>)}</div>
                   : error ? <div className="mx-auto max-w-sm py-12 text-center" role="alert"><p className="font-semibold">Models Couldn’t Load</p><p className="mt-2 text-sm text-muted">{error}</p><button type="button" className="button-secondary mt-5" onClick={onRetry}>Try Again</button></div>
-                  : embeddingUnavailable ? <div className="mx-auto max-w-sm py-12 text-center" role="status"><p className="font-semibold">Anthropic Doesn’t Offer Embeddings</p><p className="mt-2 text-sm text-muted">Choose OpenAI, Google, or a custom provider for this configuration.</p></div>
                   : filteredModels.length ? <div id={`${id}-models`} role="listbox" aria-label={`${providerName(provider)} models`}>
                     {filteredModels.map((model, index) => {
                       const selected = value?.provider === provider && value.model === model
