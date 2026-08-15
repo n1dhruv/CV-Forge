@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDown, ChevronUp, LoaderCircle, RotateCcw, Sparkles, X } from 'lucide-react'
+import { LoaderCircle, RotateCcw, Sparkles, X } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { AssistantProposal } from '@/lib/types'
@@ -44,12 +44,12 @@ export function AssistantDock(props: AssistantDockProps) {
 
   return (
     <section className="no-print shrink-0 border-t bg-canvas" aria-labelledby="assistant-title">
-      <button className="flex min-h-12 w-full items-center justify-between gap-4 px-4 text-left hover:bg-surface md:px-5" type="button" aria-expanded={props.expanded} aria-controls="assistant-panel" onClick={props.onToggle}>
+      <button className="flex min-h-12 w-full cursor-not-allowed items-center justify-between gap-4 px-4 text-left opacity-70" type="button" disabled aria-expanded="false" aria-controls="assistant-panel">
         <span className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="text-accent" size={16} aria-hidden="true" /><span id="assistant-title">Resume assistant</span></span>
-        <span className="flex items-center gap-2 text-xs text-muted">Preview changes before applying {props.expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}</span>
+        <span className="text-xs font-semibold text-muted">Coming soon</span>
       </button>
 
-      <div id="assistant-panel" className="max-h-[48vh] overflow-auto border-t" hidden={!props.expanded} aria-hidden={!props.expanded}>
+      <div id="assistant-panel" className="max-h-[48vh] overflow-auto border-t" hidden aria-hidden="true">
           <form className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end md:px-5" onSubmit={submit}>
             <label className="min-w-0 flex-1 text-sm font-semibold" htmlFor="assistant-command">
               What should change?
